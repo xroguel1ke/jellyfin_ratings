@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.3.7 — RT via MDBList + Fallback)
+// @name         Jellyfin Ratings (v6.3.8 — RT via MDBList + Fallback)
 // @namespace    https://mdblist.com
-// @version      6.3.7
-// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; inline “Ends at …”; parental badge cloned to start; debounced single observer; namespaced caches; tidy helpers and styles.
+// @version      6.3.8
+// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; inline “Ends at …”; parental badge to start; single observer; cached lookups; settings panel.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
@@ -418,9 +418,9 @@ updateAll();
 
 /* ======================================================
    SETTINGS (numbers open this panel)
-   - API key field: shows key as value (placeholder “MDBList API key” when empty)
-   - Display: Colorize ratings, Color numbers, Color icons, Show %, Show bullet, Align, Ends at format
-   - Sources: drag to reorder; aligned toggles
+   - API key field: single input, shows key as value (placeholder when empty)
+   - Checkboxes: all aligned to same right-hand column
+   - Sources: drag to reorder
    - Click outside closes; panel draggable by header
 ====================================================== */
 (function settingsMenu(){
@@ -470,23 +470,32 @@ updateAll();
   #mdbl-close:hover{background:rgba(255,255,255,0.06);color:#fff}
   #mdbl-panel .mdbl-section{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
   #mdbl-panel .mdbl-subtle{color:#9aa0a6;font-size:12px}
+
+  /* unified two-column grid for alignment */
   #mdbl-panel .mdbl-row,
   #mdbl-panel .mdbl-source{display:grid;grid-template-columns: 1fr var(--mdbl-right-col-width);align-items:center;gap:10px}
   #mdbl-panel input[type="checkbox"]{transform:scale(1.1);justify-self:end}
+
+  /* inputs/selects */
   #mdbl-panel input[type="text"]{width:100%;padding:10px 12px;border-radius:12px;border:1px solid rgba(255,255,255,0.15);background:#121317;color:#eaeaea}
   #mdbl-panel select{padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#121317;color:#eaeaea;justify-self:end}
   #mdbl-panel .mdbl-select{width:200px}
+
+  /* actions */
   #mdbl-panel .mdbl-actions{position:sticky;bottom:0;background:rgba(22,22,26,0.96);display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08)}
   #mdbl-panel button{padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#1b1c20;color:#eaeaea;cursor:pointer}
   #mdbl-panel button.primary{background:#2a6df4;border-color:#2a6df4;color:#fff}
+
+  /* sources list */
   #mdbl-sources{display:flex;flex-direction:column;gap:8px}
   .mdbl-source{background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:8px 10px;border-radius:12px}
   .mdbl-src-left{display:flex;align-items:center;gap:10px}
   .mdbl-src-left img{height:18px;width:auto}
   .mdbl-src-left .name{font-size:13px}
   .mdbl-drag-handle{justify-self:start;opacity:0.6;cursor:grab}
-  /* Key box (same visual width/height as source rows) */
-  #mdbl-key-box{background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:8px 10px;border-radius:12px}
+
+  /* API key field styled like a source row, but single-column block to avoid a right column */
+  #mdbl-key-box{background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:8px 10px;border-radius:12px;display:block}
   `;
   const style=document.createElement('style'); style.id='mdbl-settings-css'; style.textContent=css; document.head.appendChild(style);
 
@@ -561,7 +570,7 @@ updateAll();
   }
 
   function render(){
-    // Keys: one input, value shows key when present; placeholder when not
+    // Keys: single input, value shows key when present; placeholder otherwise
     const kWrap=panel.querySelector('#mdbl-sec-keys');
     const injKey=getInjectorKey(); const stored=getStoredKeys().MDBLIST||'';
     const value=injKey?injKey:(stored||'');
