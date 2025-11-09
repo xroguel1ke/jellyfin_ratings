@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.3.2 — RT via MDBList + Fallback)
+// @name         Jellyfin Ratings (v6.3.3 — SPA warmup, RT via MDBList + Fallback)
 // @namespace    https://mdblist.com
-// @version      6.3.2
-// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; custom inline “Ends at …” (12h/24h + bullet toggle) with strict dedupe; parental rating cloned to start; single MutationObserver; namespaced caches; tidy helpers and styles.
+// @version      6.3.3
+// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100; inline “Ends at …” (12h/24h + bullet toggle); parental rating cloned to start; SPA-safe warmup; single MutationObserver; namespaced caches; tidy helpers and styles.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
@@ -33,7 +33,7 @@ const DEFAULT_DISPLAY = {
   colorizeNumbersOnly:    true,   // true: number only; false: number + icon glow
   align:                  'left', // 'left' | 'center' | 'right'
   endsAtFormat:           '24h',  // '24h' | '12h'
-  endsAtBullet:           true    // show bullet • before “Ends at …”
+  endsAtBullet:           false    // show bullet • before “Ends at …”
 };
 
 /* 📏 SPACING (defaults) */
@@ -156,6 +156,38 @@ const Util = {
 'use strict';
 
 let currentImdbId = null;
+
+/* ---------- SPA navigation + warmup to ensure first line is ready ---------- */
+let __warmupTimer = null;
+let __warmupUntil = 0;
+
+function scheduleWarmup(ms = 4000) {
+  __warmupUntil = Date.now() + ms;
+  if (__warmupTimer) return; // already running
+  __warmupTimer = setInterval(() => {
+    try { updateAll(); } catch {}
+    if (Date.now() > __warmupUntil) {
+      clearInterval(__warmupTimer);
+      __warmupTimer = null;
+    }
+  }, 250);
+}
+
+(function hookNavigation() {
+  let last = location.href;
+  const fire = () => {
+    if (location.href !== last) {
+      last = location.href;
+      currentImdbId = null;      // reset state on route change
+      scheduleWarmup(4500);      // ensure we catch late renders
+    }
+  };
+  const _push = history.pushState;
+  const _replace = history.replaceState;
+  history.pushState = function() { const r = _push.apply(this, arguments); fire(); return r; };
+  history.replaceState = function() { const r = _replace.apply(this, arguments); fire(); return r; };
+  window.addEventListener('popstate', fire);
+})();
 
 /* -------- Strictly remove any non-inline (ours) “Ends at …” -------- */
 function removeBuiltInEndsAt(){
@@ -442,7 +474,7 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
         else if (s.includes('letterboxd') && ENABLE_SOURCES.letterboxd)
           appendRating(container, LOGO.letterboxd, v, 'Letterboxd', 'letterboxd', `https://letterboxd.com/imdb/${imdbId}/`);
 
-        // ==== NEW: RT from MDBList when present ====
+        // RT from MDBList when present (critic & audience)
         else if ((s === 'tomatoes' || s.includes('rotten_tomatoes')) && ENABLE_SOURCES.rotten_tomatoes) {
           const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
           appendRating(container, LOGO.tomatoes, v, 'RT Critic', 'rotten_tomatoes_critic', rtSearch);
@@ -451,7 +483,6 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
           const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
           appendRating(container, LOGO.audience, v, 'RT Audience', 'rotten_tomatoes_audience', rtSearch);
         }
-        // ============================================
 
         else if (s === 'metacritic' && ENABLE_SOURCES.metacritic_critic){
           const seg=(container.dataset.type==='show')?'tv':'movie';
@@ -600,7 +631,8 @@ MDbl.debounce = (fn, wait=150) => { clearTimeout(MDbl.debounceTimer); MDbl.debou
 (function observePage(){
   const obs = new MutationObserver(() => MDbl.debounce(updateAll, 150));
   obs.observe(document.body, { childList:true, subtree:true });
-  updateAll(); // initial
+  scheduleWarmup(4500);  // prime warmup for initial render
+  updateAll();           // initial
 })();
 
 })();
