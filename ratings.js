@@ -1,27 +1,27 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.3.9 — RT via MDBList + Fallback)
+// @name         Jellyfin Ratings (v6.4.1 — RT deep-link + Fallback)
 // @namespace    https://mdblist.com
-// @version      6.3.9
-// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; inline “Ends at …”; parental badge to start; single observer; cached lookups; settings panel.
+// @version      6.4.1
+// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; inline “Ends at …”; parental badge to start; single observer; cached lookups; settings panel. RT icons deep-link via Wikidata.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
 /* ---------- Defaults (overridable via window.MDBL_CFG) ---------- */
 const DEFAULT_ENABLE_SOURCES = {
-  imdb: true, tmdb: true, trakt: true, letterboxd: true,
-  rotten_tomatoes_critic: true, rotten_tomatoes_audience: true,
-  metacritic_critic: true, metacritic_user: true,
-  roger_ebert: true, anilist: true, myanimelist: true
+  imdb:true, tmdb:true, trakt:true, letterboxd:true,
+  rotten_tomatoes_critic:true, rotten_tomatoes_audience:true,
+  metacritic_critic:true, metacritic_user:true,
+  roger_ebert:true, anilist:true, myanimelist:true
 };
 const DEFAULT_DISPLAY = {
-  showPercentSymbol: true,
-  colorizeRatings:   true,   // master
-  colorNumbers:      true,   // numbers color
-  colorIcons:        false,  // icon glow
-  align:             'left',
-  endsAtFormat:      '24h',
-  endsAtBullet:      true
+  showPercentSymbol:true,
+  colorizeRatings:true,
+  colorNumbers:true,     // number coloring
+  colorIcons:false,      // icon glow
+  align:'left',
+  endsAtFormat:'24h',    // '24h' | '12h'
+  endsAtBullet:true
 };
 const DEFAULT_SPACING   = { ratingsTopGapPx: 8 };
 const DEFAULT_PRIORITIES = {
@@ -38,34 +38,35 @@ const SCALE_MULTIPLIER = {
 const COLOR_THRESHOLDS = { green:75, orange:50, red:0 };
 const COLOR_VALUES     = { green:'limegreen', orange:'orange', red:'crimson' };
 
-const MDBLIST_API_KEY = 'hehfnbo9y8blfyqm1d37ikubl';
 const CACHE_DURATION  = 7*24*60*60*1000; // 7 days
-const NS = 'mdbl_';
+const NS              = 'mdbl_';
 
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 const LOGO = {
-  imdb: `${ICON_BASE}/IMDb.png`,
-  tmdb: `${ICON_BASE}/TMDB.png`,
-  trakt: `${ICON_BASE}/Trakt.png`,
-  letterboxd: `${ICON_BASE}/letterboxd.png`,
-  anilist: `${ICON_BASE}/anilist.png`,
-  myanimelist: `${ICON_BASE}/mal.png`,
-  roger: `${ICON_BASE}/Roger_Ebert.png`,
-  tomatoes: `${ICON_BASE}/Rotten_Tomatoes.png`,
-  audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
-  metacritic: `${ICON_BASE}/Metacritic.png`,
-  metacritic_user: `${ICON_BASE}/mus2.png`,
+  imdb:`${ICON_BASE}/IMDb.png`, tmdb:`${ICON_BASE}/TMDB.png`,
+  trakt:`${ICON_BASE}/Trakt.png`, letterboxd:`${ICON_BASE}/letterboxd.png`,
+  anilist:`${ICON_BASE}/anilist.png`, myanimelist:`${ICON_BASE}/mal.png`,
+  roger:`${ICON_BASE}/Roger_Ebert.png`,
+  tomatoes:`${ICON_BASE}/Rotten_Tomatoes.png`,
+  audience:`${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
+  metacritic:`${ICON_BASE}/Metacritic.png`,
+  metacritic_user:`${ICON_BASE}/mus2.png`,
 };
 
-/* ---------- Merge injector config ---------- */
-const __CFG__ = (typeof window !== 'undefined' && window.MDBL_CFG) ? window.MDBL_CFG : {};
+/* ---------- Merge injector config & keys ---------- */
+const __CFG__ = (typeof window!=='undefined' && window.MDBL_CFG) ? window.MDBL_CFG : {};
 const ENABLE_SOURCES  = Object.assign({}, DEFAULT_ENABLE_SOURCES, __CFG__.sources   || {});
 const DISPLAY         = Object.assign({}, DEFAULT_DISPLAY,        __CFG__.display   || {});
 const SPACING         = Object.assign({}, DEFAULT_SPACING,        __CFG__.spacing   || {});
 const RATING_PRIORITY = Object.assign({}, DEFAULT_PRIORITIES,     __CFG__.priorities|| {});
 
-/* ---------- GM_xmlhttpRequest polyfill (when absent) ---------- */
-if (typeof GM_xmlhttpRequest === 'undefined') {
+const INJ_KEYS     = (window.MDBL_KEYS||{});
+const LS_KEYS_JSON = localStorage.getItem(`${NS}keys`);
+const LS_KEYS      = LS_KEYS_JSON ? (JSON.parse(LS_KEYS_JSON)||{}) : {};
+const MDBLIST_API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || 'hehfnbo9y8blfyqm1d37ikubl');
+
+/* ---------- Polyfill ---------- */
+if (typeof GM_xmlhttpRequest==='undefined'){
   const PROXIES=['https://api.allorigins.win/raw?url=','https://api.codetabs.com/v1/proxy?quest='];
   const DIRECT =['api.mdblist.com','graphql.anilist.co','query.wikidata.org','api.themoviedb.org'];
   window.GM_xmlhttpRequest=({method='GET',url,headers={},data,onload,onerror})=>{
@@ -117,19 +118,7 @@ function removeBuiltInEndsAt(){
   });
 }
 
-/* Clone parental rating to start */
-function ensureInlineBadge(){
-  const primary=findPrimaryRow(); if(!primary) return;
-  const ratingValue=readAndHideOriginalBadge(); if(!ratingValue) return;
-  if (primary.querySelector('#mdblistInlineParental')) return;
-  const before=findYearChip(primary)||primary.firstChild;
-  const badge=document.createElement('span');
-  badge.id='mdblistInlineParental'; badge.textContent=ratingValue;
-  Object.assign(badge.style,{display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'2px 6px',borderRadius:'6px',
-    fontWeight:'600',fontSize:'0.9em',lineHeight:'1',background:'var(--theme-primary-color, rgba(255,255,255,0.12))',
-    color:'var(--theme-text-color,#ddd)',marginRight:'10px',whiteSpace:'nowrap',flex:'0 0 auto',verticalAlign:'middle'});
-  (before&&before.parentNode)?before.parentNode.insertBefore(badge,before):primary.insertBefore(badge,primary.firstChild);
-}
+/* Primary row helpers */
 const findPrimaryRow=()=>document.querySelector('.itemMiscInfo.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo');
 function findYearChip(primary){
   for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')){
@@ -147,7 +136,35 @@ function readAndHideOriginalBadge(){
   const v=(original.textContent||'').trim(); original.style.display='none'; return v||null;
 }
 
-/* Inline Ends at … */
+/* Clone parental rating to start */
+function ensureInlineBadge(){
+  const primary=findPrimaryRow(); if(!primary) return;
+  const ratingValue=readAndHideOriginalBadge(); if(!ratingValue) return;
+  if (primary.querySelector('#mdblistInlineParental')) return;
+  const before=findYearChip(primary)||primary.firstChild;
+  const badge=document.createElement('span');
+  badge.id='mdblistInlineParental'; badge.textContent=ratingValue;
+  Object.assign(badge.style,{display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'2px 6px',borderRadius:'6px',
+    fontWeight:'600',fontSize:'0.9em',lineHeight:'1',background:'var(--theme-primary-color, rgba(255,255,255,0.12))',
+    color:'var(--theme-text-color,#ddd)',marginRight:'10px',whiteSpace:'nowrap',flex:'0 0 auto',verticalAlign:'middle'});
+  (before&&before.parentNode)?before.parentNode.insertBefore(badge,before):primary.insertBefore(badge,primary.firstChild);
+}
+
+/* Ends at */
+function parseRuntimeToMinutes(text){
+  if(!text) return 0;
+  const m=text.match(/(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
+  if(!m) return 0; const h=parseInt(m[1]||'0',10), min=parseInt(m[2]||'0',10);
+  if(h===0&&min===0){ const only=text.match(/(\d+)\s*m(?:in(?:utes?)?)?/i); return only?parseInt(only[1],10):0; }
+  return h*60+min;
+}
+function findRuntimeNode(primary){
+  for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')){
+    const mins=parseRuntimeToMinutes((el.textContent||'').trim()); if (mins>0) return {node:el, minutes:mins};
+  }
+  const mins=parseRuntimeToMinutes((primary.textContent||'').trim());
+  return mins>0?{node:primary, minutes:mins}:{node:null, minutes:0};
+}
 function ensureEndsAtInline(){
   const primary=findPrimaryRow(); if(!primary) return;
   const {node,minutes}=findRuntimeNode(primary); if(!node||!minutes) return;
@@ -164,27 +181,15 @@ function ensureEndsAtInline(){
   }
   span.textContent=content;
 }
-function findRuntimeNode(primary){
-  for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')){
-    const mins=parseRuntimeToMinutes((el.textContent||'').trim()); if (mins>0) return {node:el, minutes:mins};
-  }
-  const mins=parseRuntimeToMinutes((primary.textContent||'').trim());
-  return mins>0?{node:primary, minutes:mins}:{node:null, minutes:0};
-}
-function parseRuntimeToMinutes(text){
-  if(!text) return 0;
-  const m=text.match(/(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
-  if(!m) return 0; const h=parseInt(m[1]||'0',10), min=parseInt(m[2]||'0',10);
-  if(h===0&&min===0){ const only=text.match(/(\d+)\s*m(?:in(?:utes?)?)?/i); return only?parseInt(only[1],10):0; }
-  return h*60+min;
-}
 
-/* Containers + scan */
+/* Hide default */
 function hideDefaultRatingsOnce(){
   document.querySelectorAll('.itemMiscInfo.itemMiscInfo-primary').forEach(box=>{
     box.querySelectorAll('.starRatingContainer,.mediaInfoCriticRating').forEach(el=>el.style.display='none');
   });
 }
+
+/* Containers + scan */
 function scanLinks(){
   document.querySelectorAll('a.emby-button[href*="imdb.com/title/"]').forEach(a=>{
     if(a.dataset.mdblSeen==='1') return; a.dataset.mdblSeen='1';
@@ -244,14 +249,34 @@ function appendRating(container, logo, val, title, key, link, count, kind){
   }
 
   wrap.append(a,s); container.append(wrap);
-
-  // sort by priority
+  // sort by configured priority
   [...container.children]
     .sort((a,b)=>(RATING_PRIORITY[a.dataset.source]??999)-(RATING_PRIORITY[b.dataset.source]??999))
     .forEach(el=>container.appendChild(el));
 }
 
-/* Fetch ratings (MDBList + extras) */
+/* -------- RT Direct Link Resolver (Wikidata P1258) -------- */
+function fetchRTDirectLink(imdbId, cb){
+  const key = `${NS}rturl_${imdbId}`;
+  const cache = localStorage.getItem(key);
+  if (cache){ try { return cb(JSON.parse(cache)); } catch {} }
+  const q=`SELECT ?rtid WHERE { ?item wdt:P345 "${imdbId}" . ?item wdt:P1258 ?rtid . } LIMIT 1`;
+  GM_xmlhttpRequest({
+    method:'GET',
+    url:'https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q),
+    onload:r=>{
+      try{
+        const val = JSON.parse(r.responseText).results.bindings[0]?.rtid?.value || '';
+        const url = val ? ('https://www.rottentomatoes.com/' + val.replace(/^https?:\/\/(?:www\.)?rottentomatoes\.com\//,'')) : '';
+        if (url) localStorage.setItem(key, JSON.stringify(url));
+        cb(url || '');
+      }catch{ cb(''); }
+    },
+    onerror:()=>cb('')
+  });
+}
+
+/* -------- Fetch ratings (MDBList + extras; RT deep-link + fallback) -------- */
 function fetchRatings(tmdbId, imdbId, container, type='movie'){
   GM_xmlhttpRequest({
     method:'GET',
@@ -260,6 +285,10 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
       if(r.status!==200) return;
       let d; try{ d=JSON.parse(r.responseText); }catch{ return; }
       const title=d.title||''; const slug=Util.slug(title);
+
+      // Collect RT from MDBList first; append after we resolve direct link
+      let rtCriticVal=null, rtCriticCnt=null;
+      let rtAudienceVal=null, rtAudienceCnt=null;
 
       d.ratings?.forEach(rr=>{
         const s=(rr.source||'').toLowerCase(), v=rr.value;
@@ -272,14 +301,15 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
           appendRating(container,LOGO.trakt,v,'Trakt','trakt',`https://trakt.tv/search/imdb/${imdbId}`,cnt,'Votes');
         else if (s.includes('letterboxd') && ENABLE_SOURCES.letterboxd)
           appendRating(container,LOGO.letterboxd,v,'Letterboxd','letterboxd',`https://letterboxd.com/imdb/${imdbId}/`,cnt,'Votes');
-        else if ((s==='tomatoes'||s.includes('rotten_tomatoes')) && ENABLE_SOURCES.rotten_tomatoes_critic){
-          const rtSearch=title?`https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`:'#';
-          appendRating(container,LOGO.tomatoes,v,'RT Critic','rotten_tomatoes_critic',rtSearch,cnt,'Reviews');
+
+        // Capture RT from MDBList; we'll add after direct-link resolution
+        else if ((s==='tomatoes' || s.includes('rotten_tomatoes'))) {
+          rtCriticVal = v; rtCriticCnt = cnt;
         }
-        else if ((s.includes('popcorn')||s.includes('audience')) && ENABLE_SOURCES.rotten_tomatoes_audience){
-          const rtSearch=title?`https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`:'#';
-          appendRating(container,LOGO.audience,v,'RT Audience','rotten_tomatoes_audience',rtSearch,cnt,'Votes');
+        else if ((s.includes('popcorn') || s.includes('audience'))) {
+          rtAudienceVal = v; rtAudienceCnt = cnt;
         }
+
         else if (s==='metacritic' && ENABLE_SOURCES.metacritic_critic){
           const seg=(container.dataset.type==='show')?'tv':'movie';
           const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
@@ -294,9 +324,22 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
           appendRating(container,LOGO.roger,v,'Roger Ebert','roger_ebert',`https://www.rogerebert.com/reviews/${slug}`,cnt);
       });
 
+      const hasMDBL_RT = (rtCriticVal!=null) || (rtAudienceVal!=null);
+      if (hasMDBL_RT){
+        fetchRTDirectLink(imdbId, (rtUrl)=>{
+          const link = rtUrl || (title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#');
+          if (ENABLE_SOURCES.rotten_tomatoes_critic && rtCriticVal!=null)
+            appendRating(container, LOGO.tomatoes, rtCriticVal, 'RT Critic', 'rotten_tomatoes_critic', link, rtCriticCnt, 'Reviews');
+          if (ENABLE_SOURCES.rotten_tomatoes_audience && rtAudienceVal!=null)
+            appendRating(container, LOGO.audience, rtAudienceVal, 'RT Audience', 'rotten_tomatoes_audience', link, rtAudienceCnt, 'Votes');
+        });
+      }
+
+      // Extra sources and RT HTML fallback only if MDBList had no RT
       if (ENABLE_SOURCES.anilist)     fetchAniList(imdbId, container);
       if (ENABLE_SOURCES.myanimelist) fetchMAL(imdbId, container);
-      if (ENABLE_SOURCES.rotten_tomatoes_critic || ENABLE_SOURCES.rotten_tomatoes_audience) fetchRT(imdbId, container);
+      if (!hasMDBL_RT && (ENABLE_SOURCES.rotten_tomatoes_critic || ENABLE_SOURCES.rotten_tomatoes_audience))
+        fetchRT_HTMLFallback(imdbId, container);
     }
   });
 }
@@ -352,8 +395,8 @@ function fetchMAL(imdbId, container){
   });
 }
 
-/* RT fallback (HTML parse) */
-function fetchRT(imdbId, container){
+/* RT HTML Fallback (parse page) */
+function fetchRT_HTMLFallback(imdbId, container){
   const key=`${NS}rt_${imdbId}`;
   const cache=localStorage.getItem(key);
   if(cache){
@@ -405,10 +448,8 @@ function updateAll(){
     removeBuiltInEndsAt();
     scanLinks();
     updateRatings();
-  }catch(e){}
+  }catch{}
 }
-
-/* Observe */
 const MDbl={debounceTimer:null};
 MDbl.debounce=(fn,wait=150)=>{ clearTimeout(MDbl.debounceTimer); MDbl.debounceTimer=setTimeout(fn,wait); };
 (new MutationObserver(()=>MDbl.debounce(updateAll,150))).observe(document.body,{childList:true,subtree:true});
@@ -467,7 +508,7 @@ updateAll();
   #mdbl-panel .mdbl-section{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
   #mdbl-panel .mdbl-subtle{color:#9aa0a6;font-size:12px}
 
-  /* unified two-column grid + same horizontal padding to align checkboxes perfectly */
+  /* unified two-column grid for perfect checkbox alignment */
   #mdbl-panel .mdbl-row,
   #mdbl-panel .mdbl-source{
     display:grid;grid-template-columns: 1fr var(--mdbl-right-col);
@@ -495,10 +536,12 @@ updateAll();
   .mdbl-src-left .name{font-size:13px}
   .mdbl-drag-handle{justify-self:start;opacity:0.6;cursor:grab}
 
-  /* API key box looks exactly like a source row (single clean box) */
+  /* API key box styled like a source row (single clean box) */
   #mdbl-key-box{background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:10px;border-radius:12px}
   `;
-  const style=document.createElement('style'); style.id='mdbl-settings-css'; style.textContent=css; document.head.appendChild(style);
+  if (!document.getElementById('mdbl-settings-css')){
+    const style=document.createElement('style'); style.id='mdbl-settings-css'; style.textContent=css; document.head.appendChild(style);
+  }
 
   const panel=document.createElement('div'); panel.id='mdbl-panel';
   panel.innerHTML=`
@@ -571,7 +614,7 @@ updateAll();
   }
 
   function render(){
-    // Keys: single clean box, input without inner border
+    // Keys: single clean box, input without inner border; shows key if present
     const kWrap=panel.querySelector('#mdbl-sec-keys');
     const injKey=getInjectorKey(); const stored=getStoredKeys().MDBLIST||'';
     const value=injKey?injKey:(stored||'');
@@ -620,8 +663,6 @@ updateAll();
   function hide(){ panel.style.display='none'; }
   window.MDBL_OPEN_SETTINGS=()=>{ render(); show(); };
   panel.addEventListener('click', e=>{ if(e.target.id==='mdbl-close') hide(); });
-
-  // outside click closes
   document.addEventListener('mousedown', e=>{ if(panel.style.display!=='block') return; if(!panel.contains(e.target)) hide(); });
 
   // Reset / Save
@@ -656,7 +697,7 @@ updateAll();
 
     savePrefs(prefs); applyPrefs(prefs);
 
-    // keys (only if no injector)
+    // keys (only if no injector key)
     const injKey=getInjectorKey(); const keyInput=panel.querySelector('#mdbl-key-mdb');
     if(keyInput && !injKey) setStoredKey((keyInput.value||'').trim());
 
