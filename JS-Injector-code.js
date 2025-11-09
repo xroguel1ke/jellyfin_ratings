@@ -1,94 +1,51 @@
 /* =========================================================
-   Jellyfin Ratings — Injector (safe keys + toggles)
-   - Keys stay on your client; not in GitHub
-   - Loads ratings.js from your repo
+   Jellyfin Ratings — Minimal Injector
+   ---------------------------------------------------------
+   What this loads:
+     • A single userscript from your GitHub that adds unified ratings
+       (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, Metacritic critic/user,
+       Rotten Tomatoes critic/audience, Roger Ebert) to Jellyfin item pages.
+     • A built-in Settings panel (click any rating number) with:
+       - Source toggles + drag-to-reorder
+       - Display options (colors, %, align, “Ends at” format/bullet)
+       - Local MDBList API key input
+       - Save & Apply (hard refresh)
+
+   How to use:
+     1) Paste THIS injector snippet into the Jellyfin JS Injector.
+     2) (Optional) Put your MDBList key below. Keys set here override any local key.
+     3) Visit an item page; click any rating number to open Settings.
+
+   Notes:
+     • Your key never goes in GitHub; it stays client-side in the injector/localStorage.
+     • You can leave CONFIG empty—use the in-app menu for tweaks.
 ========================================================= */
 
-/* 1) CONFIG — your preferences */
+/* 1) (Optional) Provide only what you want to pre-set.
+      You can omit the whole block and rely on the Settings panel instead. */
 window.MDBL_CFG = {
-  sources: {
-    imdb:                true,
-    tmdb:                true,
-    trakt:               true,
-    letterboxd:          true,
-    rotten_tomatoes:     true,
-    roger_ebert:         true,
-    anilist:             true,
-    myanimelist:         true,
-    metacritic_critic:   true,
-    metacritic_user:     true,
-  },
-  display: {
-    showPercentSymbol:   true,
-    colorizeRatings:     true,
-    colorizeNumbersOnly: true,
-    align:               'left',
-    endsAtFormat:        '24h',
-    endsAtBullet:        true,
-    iconsOnly:           false, // set true for icons-only
-  },
-  spacing: { ratingsTopGapPx: 8 },
-  priorities: {
-    imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
-    rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
-    roger_ebert: 7, metacritic_critic: 8, metacritic_user: 9,
-    anilist: 10, myanimelist: 11,
-  },
+  // Example initial overrides (everything is also adjustable in Settings):
+  // display: { align: 'left', endsAtFormat: '24h', endsAtBullet: false },
+  // sources: { imdb: true, tmdb: true, trakt: true },
+  // priorities: { imdb:1, tmdb:2, trakt:3 }
 };
 
-/* 2) KEYS — prefilled (client-side only) */
-(function ensureKeys(){
-  const KEYS = {
-    // Required for MDBList API:
-    MDBLIST: 'hehfnbo9y8blfyqm1d37ikubl',
+/* 2) Keys (client-side only). MDBList is the only required one. */
+window.MDBL_KEYS = {
+  MDBLIST: 'YOUR-API-KEY-HERE'
+};
+// Mirror for reloads (harmless if blocked).
+try { localStorage.setItem('mdbl_keys', JSON.stringify(window.MDBL_KEYS)); } catch {}
 
-    // Optional future keys (not used by ratings.js right now):
-    // TMDB:   'YOUR_TMDB_KEY_HERE',
-    // TRAKT:  'YOUR_TRAKT_KEY_HERE',
-  };
-
-  // Primary path for ratings.js
-  window.MDBL_KEYS = KEYS;
-
-  // Mirror to localStorage so reloads keep working
-  try { localStorage.setItem('mdbl_keys', JSON.stringify(KEYS)); } catch {}
-})();
-
-/* 3) (Optional) Show status in console once ratings.js is loaded */
-(function pingStatusLater(){
-  const tick = setInterval(()=>{
-    if (window.MDBL_STATUS) {
-      console.groupCollapsed('[jellyfin_ratings] status');
-      console.log('Version:', window.MDBL_STATUS.version);
-      console.log('Keys:', window.MDBL_STATUS.keys); // { MDBLIST: true }
-      console.groupEnd();
-      clearInterval(tick);
-    }
-  }, 1000);
-  setTimeout(()=>clearInterval(tick), 15000);
-})();
-
-/* 4) LOADER — fetch from your raw GitHub URL and execute */
-(async function loadJellyfinRatings() {
+/* 3) Loader — fetch your GitHub script and run it (cache-busted). */
+(async () => {
   const RAW_URL = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/ratings.js';
-  const url     = `${RAW_URL}?t=${Date.now()}`; // cache-bust
-
   try {
-    console.groupCollapsed('[jellyfin_ratings] loader');
-    console.info('Fetching:', RAW_URL);
-
-    const res = await fetch(url, { cache: 'no-store', mode: 'cors' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} while fetching ${RAW_URL}`);
-
+    const res  = await fetch(`${RAW_URL}?t=${Date.now()}`, { cache: 'no-store', mode: 'cors' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const code = await res.text();
-
     try { new Function(code)(); } catch { (0, eval)(code); }
-
-    console.info('Loaded successfully.');
-    console.groupEnd();
   } catch (err) {
-    console.groupCollapsed('[jellyfin_ratings] loader ERROR');
-    console.error(err);
-    console.groupEnd();
+    console.error('[Jellyfin Ratings] loader failed:', err);
   }
 })();
