@@ -1,3 +1,5 @@
+console.info('[Jellyfin Ratings] menu.js loaded');
+
 // Jellyfin Ratings — Settings Menu (lazy-loaded)
 
 /* Reuse globals from core */
