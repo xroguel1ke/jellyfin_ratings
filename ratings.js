@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.3.5 — RT via MDBList + Fallback)
+// @name         Jellyfin Ratings (v6.3.6 — RT via MDBList + Fallback)
 // @namespace    https://mdblist.com
-// @version      6.3.5
+// @version      6.3.6
 // @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; custom inline “Ends at …”; parental badge cloned to start; debounced single observer; namespaced caches; tidy helpers and styles.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
@@ -27,8 +27,8 @@ const DEFAULT_ENABLE_SOURCES = {
 const DEFAULT_DISPLAY = {
   showPercentSymbol:  true,
   colorizeRatings:    true,   // master switch for any coloring
-  colorNumbers:       true,   // NEW: color numbers
-  colorIcons:         false,  // NEW: color icons (via soft glow)
+  colorNumbers:       true,   // color numbers
+  colorIcons:         false,  // color icons (soft glow)
   align:              'left',
   endsAtFormat:       '24h',
   endsAtBullet:       true
@@ -230,7 +230,7 @@ function updateRatings(){
 }
 
 /* render one badge — icon links out (with count tooltip), number opens settings */
-function appendRating(container, logo, val, title, key, link, count){
+function appendRating(container, logo, val, title, key, link, count, countKind){
   if (!Util.validNumber(val)) return;
   const n=Util.normalize(val,key); if(!Util.validNumber(n)) return;
   const r=Util.round(n), disp=DISPLAY.showPercentSymbol?`${r}%`:`${r}`;
@@ -243,8 +243,7 @@ function appendRating(container, logo, val, title, key, link, count){
   /* icon (external link) */
   const a=document.createElement('a'); a.href=link||'#'; if (link&&link!=='#') a.target='_blank'; a.style.textDecoration='none';
   const img=document.createElement('img'); img.src=logo; img.alt=title; img.style='height:1.3em;vertical-align:middle;';
-  const countText = (typeof count==='number' && isFinite(count)) ? count.toLocaleString()
-                   : (typeof count==='string' && count.trim() ? count.trim() : '');
+  const countText = (typeof count==='number' && isFinite(count)) ? `${count.toLocaleString()} ${countKind || (key==='rotten_tomatoes_critic'?'Reviews':'Votes')}` : '';
   img.title = countText ? `${title} — ${countText}` : title;
   a.appendChild(img);
 
@@ -279,42 +278,43 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
 
       d.ratings?.forEach(rr=>{
         const s=(rr.source||'').toLowerCase(), v=rr.value;
-        const cnt = rr.votes || rr.count || rr.reviewCount || rr.ratingCount;
+        const cnt = rr.votes || rr.count || rr.reviewCount || rr.ratingCount; // pragmatic
+        const kind = rr.reviewCount ? 'Reviews' : 'Votes';
 
         if (s.includes('imdb') && ENABLE_SOURCES.imdb)
-          appendRating(container, LOGO.imdb, v, 'IMDb', 'imdb', `https://www.imdb.com/title/${imdbId}/`, cnt);
+          appendRating(container, LOGO.imdb, v, 'IMDb', 'imdb', `https://www.imdb.com/title/${imdbId}/`, cnt, 'Votes');
 
         else if (s.includes('tmdb') && ENABLE_SOURCES.tmdb)
-          appendRating(container, LOGO.tmdb, v, 'TMDb', 'tmdb', `https://www.themoviedb.org/${type}/${tmdbId}`, cnt);
+          appendRating(container, LOGO.tmdb, v, 'TMDb', 'tmdb', `https://www.themoviedb.org/${type}/${tmdbId}`, cnt, 'Votes');
 
         else if (s.includes('trakt') && ENABLE_SOURCES.trakt)
-          appendRating(container, LOGO.trakt, v, 'Trakt', 'trakt', `https://trakt.tv/search/imdb/${imdbId}`, cnt);
+          appendRating(container, LOGO.trakt, v, 'Trakt', 'trakt', `https://trakt.tv/search/imdb/${imdbId}`, cnt, 'Votes');
 
         else if (s.includes('letterboxd') && ENABLE_SOURCES.letterboxd)
-          appendRating(container, LOGO.letterboxd, v, 'Letterboxd', 'letterboxd', `https://letterboxd.com/imdb/${imdbId}/`, cnt);
+          appendRating(container, LOGO.letterboxd, v, 'Letterboxd', 'letterboxd', `https://letterboxd.com/imdb/${imdbId}/`, cnt, 'Votes');
 
         else if ((s==='tomatoes'||s.includes('rotten_tomatoes')) && ENABLE_SOURCES.rotten_tomatoes_critic){
           const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
-          appendRating(container, LOGO.tomatoes, v, 'RT Critic', 'rotten_tomatoes_critic', rtSearch, cnt);
+          appendRating(container, LOGO.tomatoes, v, 'RT Critic', 'rotten_tomatoes_critic', rtSearch, cnt, 'Reviews');
         }
         else if ((s.includes('popcorn')||s.includes('audience')) && ENABLE_SOURCES.rotten_tomatoes_audience){
           const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
-          appendRating(container, LOGO.audience, v, 'RT Audience', 'rotten_tomatoes_audience', rtSearch, cnt);
+          appendRating(container, LOGO.audience, v, 'RT Audience', 'rotten_tomatoes_audience', rtSearch, cnt, 'Votes');
         }
 
         else if (s==='metacritic' && ENABLE_SOURCES.metacritic_critic){
           const seg=(container.dataset.type==='show')?'tv':'movie';
           const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
-          appendRating(container, LOGO.metacritic, v, 'Metacritic (Critic)', 'metacritic_critic', link, cnt);
+          appendRating(container, LOGO.metacritic, v, 'Metacritic (Critic)', 'metacritic_critic', link, cnt, 'Reviews');
         }
         else if (s.includes('metacritic')&&s.includes('user') && ENABLE_SOURCES.metacritic_user){
           const seg=(container.dataset.type==='show')?'tv':'movie';
           const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
-          appendRating(container, LOGO.metacritic_user, v, 'Metacritic (User)', 'metacritic_user', link, cnt);
+          appendRating(container, LOGO.metacritic_user, v, 'Metacritic (User)', 'metacritic_user', link, cnt, 'Votes');
         }
 
         else if (s.includes('roger') && ENABLE_SOURCES.roger_ebert)
-          appendRating(container, LOGO.roger, v, 'Roger Ebert', 'roger_ebert', `https://www.rogerebert.com/reviews/${slug}`, cnt);
+          appendRating(container, LOGO.roger, v, 'Roger Ebert', 'roger_ebert', `https://www.rogerebert.com/reviews/${slug}`, cnt, kind);
       });
 
       if (ENABLE_SOURCES.anilist)     fetchAniList(imdbId, container);
@@ -367,7 +367,7 @@ function fetchMAL(imdbId, container){
               const d = JSON.parse(rr.responseText).data;
               if (Util.validNumber(d.score)){
                 const count = (typeof d.scored_by==='number') ? d.scored_by : undefined;
-                appendRating(container, LOGO.myanimelist, d.score, 'MyAnimeList', 'myanimelist', `https://myanimelist.net/anime/${id}`, count);
+                appendRating(container, LOGO.myanimelist, d.score, 'MyAnimeList', 'myanimelist', `https://myanimelist.net/anime/${id}`, count, 'Votes');
               }
             }catch{}
           }
@@ -418,9 +418,9 @@ function fetchRT(imdbId, container){
 
   function addRT(c, s){
     if (Util.validNumber(s.critic)   && ENABLE_SOURCES.rotten_tomatoes_critic)
-      appendRating(c, LOGO.tomatoes, s.critic, 'RT Critic', 'rotten_tomatoes_critic', s.link||'#', s.cCount);
+      appendRating(c, LOGO.tomatoes, s.critic, 'RT Critic', 'rotten_tomatoes_critic', s.link||'#', s.cCount, 'Reviews');
     if (Util.validNumber(s.audience) && ENABLE_SOURCES.rotten_tomatoes_audience)
-      appendRating(c, LOGO.audience, s.audience, 'RT Audience', 'rotten_tomatoes_audience', s.link||'#', s.aCount);
+      appendRating(c, LOGO.audience, s.audience, 'RT Audience', 'rotten_tomatoes_audience', s.link||'#', s.aCount, 'Votes');
   }
 }
 
@@ -447,10 +447,10 @@ updateAll();
 /* ======================================================
    SETTINGS (numbers open this panel)
    - Keep MDBList API key (no “Keys” heading)
-   - Display: Colorize ratings, Color numbers, Color icons, then “Show bullet…”
+   - Display: Colorize ratings, Color numbers, Color icons, Show %, Show bullet, Align, Ends at format
    - RT & MC are separate toggles (Critic/User & Critic/Audience)
    - Click outside closes; panel is draggable by its header
-   - Checkboxes across sections are aligned
+   - All checkboxes aligned to a single column; API key box matches Sources size
 ====================================================== */
 (function settingsMenu(){
   const PREFS_KEY = `${NS}prefs`;
@@ -506,7 +506,7 @@ updateAll();
   #mdbl-close:hover{background:rgba(255,255,255,0.06);color:#fff}
   #mdbl-panel .mdbl-section{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
   #mdbl-panel .mdbl-subtle{color:#9aa0a6;font-size:12px}
-  /* unified row/grid for alignment */
+  /* unified grid for alignment */
   #mdbl-panel .mdbl-row,
   #mdbl-panel .mdbl-source{display:grid;grid-template-columns: 1fr var(--mdbl-right-col-width);align-items:center;gap:10px}
   #mdbl-panel input[type="checkbox"]{transform:scale(1.1);justify-self:end}
@@ -521,7 +521,10 @@ updateAll();
   .mdbl-src-left{display:flex;align-items:center;gap:10px}
   .mdbl-src-left img{height:18px;width:auto}
   .mdbl-src-left .name{font-size:13px}
-  .mdbl-drag-handle{justify-self:start;opacity:0.6;margin-left:-2px;cursor:grab}
+  .mdbl-drag-handle{justify-self:start;opacity:0.6;cursor:grab}
+  /* API key box styled like source rows */
+  #mdbl-key-box{background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:8px 10px;border-radius:12px}
+  #mdbl-key-box .label{font-size:13px;color:#9aa0a6}
   `;
   const style=document.createElement('style'); style.id='mdbl-settings-css'; style.textContent=css; document.head.appendChild(style);
 
@@ -576,9 +579,7 @@ updateAll();
         <img src="${item.icon}" alt="${item.label}">
         <span class="name">${item.label}</span>
       </div>
-      <div class="right">
-        <input type="checkbox" ${checked?'checked':''} data-toggle="${key}">
-      </div>
+      <input type="checkbox" ${checked?'checked':''} data-toggle="${key}">
     `;
     return row;
   }
@@ -602,18 +603,16 @@ updateAll();
   }
 
   function render(){
-    /* Keys */
+    /* Keys — styled like a source row, full width */
     const kWrap=panel.querySelector('#mdbl-sec-keys');
     const injKey=getInjectorKey(); const stored=getStoredKeys().MDBLIST||'';
     const readonly=injKey?'readonly':''; const ph=injKey?'(managed by injector)':'Enter MDBList API key';
     kWrap.innerHTML=`
-      <div class="mdbl-row">
-        <label class="mdbl-subtle">MDBList API key</label>
-        <span></span>
-      </div>
-      <div class="mdbl-row">
+      <div id="mdbl-key-box" class="mdbl-source">
+        <div class="mdbl-src-left">
+          <span class="label">MDBList API key</span>
+        </div>
         <input type="text" id="mdbl-key-mdb" ${readonly} placeholder="${ph}" value="${injKey?injKey:(stored||'')}">
-        <span></span>
       </div>
     `;
 
@@ -624,7 +623,7 @@ updateAll();
     orderFromPriorities().forEach(item=>sList.appendChild(makeSourceRow(item)));
     enableDnD(sList);
 
-    /* Display — order: Colorize ratings → Color numbers → Color icons → Show bullet → Align → Ends at format */
+    /* Display — order: Colorize → Color numbers → Color icons → Show % → Show bullet → Align → Ends at format */
     const dWrap=panel.querySelector('#mdbl-sec-display');
     dWrap.innerHTML=`
       <div class="mdbl-subtle">Display</div>
