@@ -659,34 +659,55 @@ window.MDBL_API = {
 };
 /* ======================================================
    Floating Settings Menu (bottom-right) + Keys editor
-   - Persists to localStorage
-   - Mutates live config objects (no reload needed)
-   - Prefers keys from injector (window.MDBL_KEYS) over localStorage
-   - Calls MDBL_API.refresh() after Save
+   v2 — single column, icons, drag&drop sort, page reload on save
 ====================================================== */
 (function settingsMenu(){
   const PREFS_KEY = `${NS}prefs`;
   const LS_KEYS   = 'mdbl_keys'; // where we mirror keys locally
 
-  function deepClone(o){ return JSON.parse(JSON.stringify(o)); }
-  function loadPrefs(){
-    try { return JSON.parse(localStorage.getItem(PREFS_KEY) || '{}'); } catch { return {}; }
-  }
-  function savePrefs(p){
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify(p||{})); } catch {}
-  }
+  // ---- Utilities -----------------------------------------------------------
+  const deepClone = (o)=>JSON.parse(JSON.stringify(o));
+  const loadPrefs = ()=>{ try { return JSON.parse(localStorage.getItem(PREFS_KEY)||'{}'); } catch { return {}; } };
+  const savePrefs = (p)=>{ try { localStorage.setItem(PREFS_KEY, JSON.stringify(p||{})); } catch {} };
+
+  // Human labels + icons for sources (keys from your script)
+  const SOURCE_LABEL = {
+    imdb: 'IMDb',
+    tmdb: 'TMDb',
+    trakt: 'Trakt',
+    letterboxd: 'Letterboxd',
+    rotten_tomatoes_critic: 'Rotten Tomatoes (Critic)',
+    rotten_tomatoes_audience: 'Rotten Tomatoes (Audience)',
+    roger_ebert: 'Roger Ebert',
+    metacritic_critic: 'Metacritic (Critic)',
+    metacritic_user: 'Metacritic (User)',
+    anilist: 'AniList',
+    myanimelist: 'MyAnimeList',
+  };
+  const SOURCE_ICON = {
+    imdb: LOGO.imdb,
+    tmdb: LOGO.tmdb,
+    trakt: LOGO.trakt,
+    letterboxd: LOGO.letterboxd,
+    rotten_tomatoes_critic: LOGO.tomatoes,
+    rotten_tomatoes_audience: LOGO.audience,
+    roger_ebert: LOGO.roger,
+    metacritic_critic: LOGO.metacritic,
+    metacritic_user: LOGO.metcacritic_user || LOGO.metacritic_user, // fallback if name differs
+    anilist: LOGO.anilist,
+    myanimelist: LOGO.myanimelist,
+  };
 
   // Build defaults snapshot from current live objects
   const DEFAULTS = {
-    sources:       deepClone(ENABLE_SOURCES),
-    display:       deepClone(DISPLAY),
-    spacing:       deepClone(SPACING),
-    priorities:    deepClone(RATING_PRIORITY),
+    sources:    deepClone(ENABLE_SOURCES),
+    display:    deepClone(DISPLAY),
+    priorities: deepClone(RATING_PRIORITY),
   };
 
-  // --- Keys helpers (match ratings.js preference order) ---
+  // --- Keys helpers (prefer injector over local) ---------------------------
   function getInjectorKey(){
-    try { return (window.MDBL_KEYS && typeof window.MDBL_KEYS === 'object' && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; }
+    try { return (window.MDBL_KEYS && typeof window.MDBL_KEYS==='object' && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; }
     catch { return ''; }
   }
   function getStoredKeys(){
@@ -695,26 +716,21 @@ window.MDBL_API = {
   function getEffectiveKey(){
     const inj = getInjectorKey();
     if (inj) return inj;
-    const stored = getStoredKeys();
-    return stored.MDBLIST || '';
+    return getStoredKeys().MDBLIST || '';
   }
   function setStoredKey(newKey){
     const obj = Object.assign({}, getStoredKeys(), { MDBLIST: newKey || '' });
     try { localStorage.setItem(LS_KEYS, JSON.stringify(obj)); } catch {}
-    // Only set window.MDBL_KEYS if the injector didn't already provide one
-    if (!getInjectorKey()) {
-      try {
-        if (!window.MDBL_KEYS || typeof window.MDBL_KEYS !== 'object') window.MDBL_KEYS = {};
-        window.MDBL_KEYS.MDBLIST = newKey || '';
-      } catch {}
+    if (!getInjectorKey()) { // only mirror if no injector override
+      if (!window.MDBL_KEYS || typeof window.MDBL_KEYS!=='object') window.MDBL_KEYS = {};
+      window.MDBL_KEYS.MDBLIST = newKey || '';
     }
-    // Update status flag if present
     if (window.MDBL_STATUS && window.MDBL_STATUS.keys) {
       window.MDBL_STATUS.keys.MDBLIST = !!getEffectiveKey();
     }
   }
 
-  // Apply prefs into live objects (mutates in place so existing refs see changes)
+  // Apply prefs into live objects (mutates in place)
   function applyPrefs(prefs){
     const p = prefs || {};
     if (p.sources) Object.keys(ENABLE_SOURCES).forEach(k=>{
@@ -723,11 +739,6 @@ window.MDBL_API = {
     if (p.display){
       Object.keys(DISPLAY).forEach(k=>{
         if (k in p.display) DISPLAY[k] = p.display[k];
-      });
-    }
-    if (p.spacing){
-      Object.keys(SPACING).forEach(k=>{
-        if (k in p.spacing) SPACING[k] = Number(p.spacing[k]) || SPACING[k];
       });
     }
     if (p.priorities){
@@ -740,42 +751,40 @@ window.MDBL_API = {
     }
   }
 
-  // Load saved prefs (if any) and apply once at boot
+  // Load saved prefs (if any) and apply once
   const saved = loadPrefs();
-  if (saved && Object.keys(saved).length) {
-    applyPrefs(saved);
-  }
+  if (saved && Object.keys(saved).length) applyPrefs(saved);
 
-  // ---------- UI ----------
+  // ---- UI -----------------------------------------------------------------
   const css = `
-  #mdbl-gear { position: fixed; right: 16px; bottom: 16px; width: 44px; height: 44px;
-    border-radius: 999px; border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(20,20,20,0.7); backdrop-filter: blur(6px);
-    display:flex; align-items:center; justify-content:center; cursor:pointer; z-index: 99999;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35); }
-  #mdbl-gear svg { width: 22px; height: 22px; fill: currentColor; color: #ddd; }
-  #mdbl-panel { position: fixed; right: 16px; bottom: 70px; width: 380px; max-height: 72vh; overflow:auto;
-    border-radius: 14px; border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(22,22,26,0.92); backdrop-filter: blur(8px); color: #eaeaea; z-index: 99999;
-    box-shadow: 0 20px 40px rgba(0,0,0,0.45); display:none; }
-  #mdbl-panel header { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.08); display:flex; align-items:center; gap:8px; }
-  #mdbl-panel header h3 { margin: 0; font-size: 15px; font-weight: 700; flex:1; }
-  #mdbl-panel .mdbl-section { padding: 12px 14px; }
-  #mdbl-panel .mdbl-row { display:flex; align-items:center; justify-content:space-between; gap: 10px; padding: 6px 0; }
-  #mdbl-panel .mdbl-row label { font-size: 13px; }
-  #mdbl-panel .mdbl-grid { display:grid; grid-template-columns: 1fr auto; gap: 4px 8px; }
-  #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size: 12px; }
-  #mdbl-panel input[type="number"], #mdbl-panel input[type="text"] { width: 80px; padding:4px 6px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea; }
-  #mdbl-panel input[type="text"] { width: 100%; }
-  #mdbl-panel select { width: 120px; padding:4px 6px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea; }
-  #mdbl-panel .mdbl-actions { display:flex; gap:10px; padding: 12px 14px; border-top: 1px solid rgba(255,255,255,0.08); }
-  #mdbl-panel button { padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
-  #mdbl-panel button.primary { background:#2a6df4; border-color:#2a6df4; color:white; }
-  #mdbl-panel .mdbl-hint { padding: 0 14px 12px; color:#9aa0a6; font-size:12px; }
-  #mdbl-panel .mdbl-chips { display:flex; flex-wrap:wrap; gap:8px; }
-  #mdbl-panel .mdbl-chip { display:inline-flex; align-items:center; gap:6px; background:#0f1115; border:1px solid rgba(255,255,255,0.1); padding:6px 8px; border-radius:999px; }
-  #mdbl-panel .mdbl-chip input { transform: scale(1.1); }
-  #mdbl-keys-note { margin-top: 6px; font-size: 12px; color: #9aa0a6; }
+  #mdbl-gear{position:fixed;right:16px;bottom:16px;width:44px;height:44px;border-radius:999px;border:1px solid rgba(255,255,255,0.15);
+    background:rgba(20,20,20,0.78);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:99999;
+    box-shadow:0 4px 14px rgba(0,0,0,0.35)}
+  #mdbl-gear svg{width:22px;height:22px;fill:currentColor;color:#ddd}
+  #mdbl-panel{position:fixed;right:16px;bottom:70px;width:420px;max-height:72vh;overflow:auto;border-radius:14px;border:1px solid rgba(255,255,255,0.15);
+    background:rgba(22,22,26,0.94);backdrop-filter:blur(8px);color:#eaeaea;z-index:99999;box-shadow:0 20px 40px rgba(0,0,0,0.45);display:none}
+  #mdbl-panel header{position:sticky;top:0;background:rgba(22,22,26,0.96);padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;gap:8px}
+  #mdbl-panel header h3{margin:0;font-size:15px;font-weight:700;flex:1}
+  #mdbl-panel .mdbl-section{padding:12px 16px;display:flex;flex-direction:column;gap:10px}
+  #mdbl-panel .mdbl-subtle{color:#9aa0a6;font-size:12px}
+  #mdbl-panel .mdbl-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  #mdbl-panel .mdbl-row > *:last-child{margin-left:auto}
+  #mdbl-panel input[type="checkbox"]{transform:scale(1.1)}
+  #mdbl-panel select, #mdbl-panel input[type="text"]{width:100%;padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#121317;color:#eaeaea}
+  #mdbl-panel .mdbl-actions{position:sticky;bottom:0;background:rgba(22,22,26,0.96);display:flex;gap:10px;padding:12px 16px;border-top:1px solid rgba(255,255,255,0.08)}
+  #mdbl-panel button{padding:9px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.15);background:#1b1c20;color:#eaeaea;cursor:pointer}
+  #mdbl-panel button.primary{background:#2a6df4;border-color:#2a6df4;color:#fff}
+  /* Source chips */
+  #mdbl-sources{display:flex;flex-direction:column;gap:8px}
+  .mdbl-source{display:flex;align-items:center;gap:10px;background:#0f1115;border:1px solid rgba(255,255,255,0.1);padding:8px 10px;border-radius:12px}
+  .mdbl-source img{height:18px;width:auto}
+  .mdbl-source .name{font-size:13px}
+  .mdbl-source .spacer{flex:1}
+  .mdbl-drag{cursor:grab;opacity:0.8}
+  .mdbl-drag:active{cursor:grabbing}
+  .mdbl-drag-handle{font-size:16px;opacity:0.6}
+  .mdbl-dropping{outline:2px dashed rgba(255,255,255,0.25)}
+  #mdbl-keys-note{margin-top:6px;font-size:12px;color:#9aa0a6}
   `;
   const style = document.createElement('style');
   style.id = 'mdbl-settings-css';
@@ -797,23 +806,83 @@ window.MDBL_API = {
     </header>
 
     <div class="mdbl-section" id="mdbl-sec-keys"></div>
-
     <div class="mdbl-section" id="mdbl-sec-sources"></div>
     <div class="mdbl-section" id="mdbl-sec-display"></div>
-    <div class="mdbl-section" id="mdbl-sec-spacing"></div>
-    <div class="mdbl-section" id="mdbl-sec-priorities"></div>
 
     <div class="mdbl-actions">
       <button id="mdbl-btn-cancel">Close</button>
       <button id="mdbl-btn-reset">Reset</button>
       <button id="mdbl-btn-save" class="primary">Save & Apply</button>
     </div>
-    <div class="mdbl-hint">Settings and local keys are stored only on this device. If your injector provides a key, it takes precedence.</div>
+    <div class="mdbl-subtle" style="padding:0 16px 14px;">
+      Settings and local keys are stored only on this device. If your injector provides a key, it takes precedence.
+    </div>
   `;
   document.body.appendChild(panel);
 
+  // ---- Drag & Drop helpers for priorities --------------------------------
+  function buildOrderedSourceList(){
+    // order by current RATING_PRIORITY (lower first)
+    return Object.keys(RATING_PRIORITY)
+      .sort((a,b)=>(RATING_PRIORITY[a]??999)-(RATING_PRIORITY[b]??999))
+      .filter(k => k in ENABLE_SOURCES); // keep only known keys
+  }
+  function makeSourceRow(key){
+    const li = document.createElement('div');
+    li.className = 'mdbl-source mdbl-drag';
+    li.draggable = true;
+    li.dataset.k = key;
+    const icon = SOURCE_ICON[key] || '';
+    const name = SOURCE_LABEL[key] || key.replace(/_/g,' ');
+    li.innerHTML = `
+      <img src="${icon}" alt="${name}" title="${name}">
+      <span class="name">${name}</span>
+      <div class="spacer"></div>
+      <label class="toggle">
+        <input type="checkbox" ${ENABLE_SOURCES[key] ? 'checked':''} data-toggle="${key}">
+      </label>
+      <span class="mdbl-drag-handle" title="Drag to reorder">⋮⋮</span>
+    `;
+    return li;
+  }
+  function enableDnD(container){
+    let dragging = null;
+    container.addEventListener('dragstart', e=>{
+      const target = e.target.closest('.mdbl-source');
+      if (!target) return;
+      dragging = target;
+      target.classList.add('mdbl-dropping');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    container.addEventListener('dragover', e=>{
+      if (!dragging) return;
+      e.preventDefault();
+      const after = getDragAfterElement(container, e.clientY);
+      if (after == null) container.appendChild(dragging);
+      else container.insertBefore(dragging, after);
+    });
+    container.addEventListener('drop', ()=>{
+      if (dragging) dragging.classList.remove('mdbl-dropping');
+      dragging = null;
+    });
+    container.addEventListener('dragend', ()=>{
+      if (dragging) dragging.classList.remove('mdbl-dropping');
+      dragging = null;
+    });
+    function getDragAfterElement(container, y){
+      const els = [...container.querySelectorAll('.mdbl-source:not(.mdbl-dropping)')];
+      return els.reduce((closest,child)=>{
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height/2;
+        if (offset < 0 && offset > closest.offset) return { offset, element: child };
+        else return closest;
+      }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+  }
+
+  // ---- Render -------------------------------------------------------------
   function render(){
-    // KEYS
+    // KEYS (top)
     const kWrap = panel.querySelector('#mdbl-sec-keys');
     const injKey = getInjectorKey();
     const effKey = getEffectiveKey();
@@ -824,82 +893,49 @@ window.MDBL_API = {
     const note = injKey
       ? `<div id="mdbl-keys-note">Using key from injector. Local value is ignored while the injector key exists.</div>`
       : `<div id="mdbl-keys-note">No injector key detected. This local key will be used.</div>`;
-
     kWrap.innerHTML = `
-      <div class="mdbl-subtle" style="margin-bottom:6px;">Keys</div>
-      <div class="mdbl-grid" style="grid-template-columns: 1fr;">
-        <label for="mdbl-key-mdb" class="mdbl-subtle">MDBList API key (effective: <strong>${masked}</strong>)</label>
-        <input type="text" id="mdbl-key-mdb" ${readonlyAttr} placeholder="${placeholder}" value="${injKey ? injKey : (stored || '')}">
-        ${note}
-      </div>
+      <div class="mdbl-subtle">Keys</div>
+      <label class="mdbl-subtle">MDBList API key (effective: <strong>${masked}</strong>)</label>
+      <input type="text" id="mdbl-key-mdb" ${readonlyAttr} placeholder="${placeholder}" value="${injKey ? injKey : (stored || '')}">
+      ${note}
     `;
 
-    // SOURCES
+    // SOURCES (draggable list)
     const sWrap = panel.querySelector('#mdbl-sec-sources');
-    sWrap.innerHTML = `<div class="mdbl-subtle" style="margin-bottom:6px;">Sources</div>
-      <div class="mdbl-chips" id="mdbl-sources"></div>`;
-    const sChips = sWrap.querySelector('#mdbl-sources');
-    Object.keys(DEFAULTS.sources).forEach(k=>{
-      const chip = document.createElement('label');
-      chip.className = 'mdbl-chip';
-      chip.innerHTML = `
-        <input type="checkbox" data-k="${k}" ${ENABLE_SOURCES[k] ? 'checked':''}>
-        <span>${k}</span>
-      `;
-      sChips.appendChild(chip);
-    });
+    sWrap.innerHTML = `<div class="mdbl-subtle">Sources (drag to reorder)</div><div id="mdbl-sources"></div>`;
+    const sList = sWrap.querySelector('#mdbl-sources');
+    buildOrderedSourceList().forEach(k=> sList.appendChild(makeSourceRow(k)));
+    enableDnD(sList);
 
-    // DISPLAY
+    // DISPLAY (single column)
     const dWrap = panel.querySelector('#mdbl-sec-display');
-    dWrap.innerHTML = `<div class="mdbl-subtle" style="margin-bottom:6px;">Display</div>
-      <div class="mdbl-grid">
-        <label>Show %</label><input type="checkbox" id="d_showPercent" ${DISPLAY.showPercentSymbol?'checked':''}>
-        <label>Colorize ratings</label><input type="checkbox" id="d_colorize" ${DISPLAY.colorizeRatings?'checked':''}>
-        <label>Numbers only colored</label><input type="checkbox" id="d_colorNumsOnly" ${DISPLAY.colorizeNumbersOnly?'checked':''}>
-        <label>Icons only</label><input type="checkbox" id="d_iconsOnly" ${DISPLAY.iconsOnly?'checked':''}>
-        <label>Align</label>
-          <select id="d_align">
-            <option value="left" ${DISPLAY.align==='left'?'selected':''}>left</option>
-            <option value="center" ${DISPLAY.align==='center'?'selected':''}>center</option>
-            <option value="right" ${DISPLAY.align==='right'?'selected':''}>right</option>
-          </select>
-        <label>Ends at format</label>
-          <select id="d_endsFmt">
-            <option value="24h" ${DISPLAY.endsAtFormat==='24h'?'selected':''}>24h</option>
-            <option value="12h" ${DISPLAY.endsAtFormat==='12h'?'selected':''}>12h</option>
-          </select>
-        <label>Show bullet before “Ends at”</label><input type="checkbox" id="d_endsBullet" ${DISPLAY.endsAtBullet?'checked':''}>
-      </div>`;
-
-    // SPACING
-    const spWrap = panel.querySelector('#mdbl-sec-spacing');
-    spWrap.innerHTML = `<div class="mdbl-subtle" style="margin-bottom:6px;">Spacing</div>
-      <div class="mdbl-grid">
-        <label>Ratings top gap (px)</label><input type="number" id="sp_gap" min="0" max="48" step="1" value="${Number(SPACING.ratingsTopGapPx)||8}">
-      </div>`;
-
-    // PRIORITIES
-    const pWrap = panel.querySelector('#mdbl-sec-priorities');
-    const pr = RATING_PRIORITY;
-    pWrap.innerHTML = `<div class="mdbl-subtle" style="margin-bottom:6px;">Sort priority (lower number shows earlier)</div>
-      <div class="mdbl-grid" id="mdbl-prios"></div>`;
-    const pGrid = pWrap.querySelector('#mdbl-prios');
-    Object.keys(pr).sort((a,b)=>pr[a]-pr[b]).forEach(k=>{
-      const row = document.createElement('div');
-      row.className = 'mdbl-row';
-      row.innerHTML = `
-        <label for="prio_${k}">${k}</label>
-        <input type="number" id="prio_${k}" data-k="${k}" step="1" value="${Number(pr[k])}">
-      `;
-      pGrid.appendChild(row);
-    });
+    dWrap.innerHTML = `
+      <div class="mdbl-subtle">Display</div>
+      <label class="mdbl-row"><span>Show %</span><input type="checkbox" id="d_showPercent" ${DISPLAY.showPercentSymbol?'checked':''}></label>
+      <label class="mdbl-row"><span>Colorize ratings</span><input type="checkbox" id="d_colorize" ${DISPLAY.colorizeRatings?'checked':''}></label>
+      <label class="mdbl-row"><span>Numbers only colored</span><input type="checkbox" id="d_colorNumsOnly" ${DISPLAY.colorizeNumbersOnly?'checked':''}></label>
+      <label class="mdbl-row"><span>Icons only</span><input type="checkbox" id="d_iconsOnly" ${DISPLAY.iconsOnly?'checked':''}></label>
+      <label class="mdbl-row"><span>Show bullet before “Ends at”</span><input type="checkbox" id="d_endsBullet" ${DISPLAY.endsAtBullet?'checked':''}></label>
+      <label class="mdbl-row">
+        <span>Align</span>
+        <select id="d_align">
+          <option value="left" ${DISPLAY.align==='left'?'selected':''}>left</option>
+          <option value="center" ${DISPLAY.align==='center'?'selected':''}>center</option>
+          <option value="right" ${DISPLAY.align==='right'?'selected':''}>right</option>
+        </select>
+      </label>
+      <label class="mdbl-row">
+        <span>Ends at format</span>
+        <select id="d_endsFmt">
+          <option value="24h" ${DISPLAY.endsAtFormat==='24h'?'selected':''}>24h</option>
+          <option value="12h" ${DISPLAY.endsAtFormat==='12h'?'selected':''}>12h</option>
+        </select>
+      </label>
+    `;
   }
 
   function show(){ panel.style.display = 'block'; }
   function hide(){ panel.style.display = 'none'; }
-
-  document.body.appendChild(gear);
-  document.body.appendChild(panel);
 
   gear.addEventListener('click', () => {
     if (panel.style.display === 'block') hide(); else { render(); show(); }
@@ -909,20 +945,23 @@ window.MDBL_API = {
   panel.querySelector('#mdbl-btn-reset').addEventListener('click', ()=>{
     Object.assign(ENABLE_SOURCES, deepClone(DEFAULTS.sources));
     Object.assign(DISPLAY,         deepClone(DEFAULTS.display));
-    Object.assign(SPACING,         deepClone(DEFAULTS.spacing));
     Object.assign(RATING_PRIORITY, deepClone(DEFAULTS.priorities));
-    savePrefs({}); // clear user prefs (keys are NOT cleared here)
+    savePrefs({});
     render();
     if (window.MDBL_API && typeof window.MDBL_API.refresh==='function') window.MDBL_API.refresh();
   });
 
   panel.querySelector('#mdbl-btn-save').addEventListener('click', ()=>{
-    // Build prefs from UI
-    const prefs = { sources:{}, display:{}, spacing:{}, priorities:{} };
+    // prefs to persist
+    const prefs = { sources:{}, display:{}, priorities:{} };
 
-    // Sources
-    panel.querySelectorAll('#mdbl-sources input[type="checkbox"]').forEach(cb=>{
-      prefs.sources[cb.dataset.k] = cb.checked;
+    // Sources toggle states + order -> priorities
+    const orderedKeys = [...panel.querySelectorAll('#mdbl-sources .mdbl-source')].map(el=>el.dataset.k);
+    orderedKeys.forEach((k, idx)=>{
+      prefs.priorities[k] = idx + 1; // lower appears earlier
+    });
+    panel.querySelectorAll('#mdbl-sources input[type="checkbox"][data-toggle]').forEach(cb=>{
+      prefs.sources[cb.dataset.toggle] = cb.checked;
     });
 
     // Display
@@ -934,29 +973,20 @@ window.MDBL_API = {
     prefs.display.endsAtFormat        = panel.querySelector('#d_endsFmt').value;
     prefs.display.endsAtBullet        = panel.querySelector('#d_endsBullet').checked;
 
-    // Spacing
-    prefs.spacing.ratingsTopGapPx = Number(panel.querySelector('#sp_gap').value) || 8;
-
-    // Priorities
-    panel.querySelectorAll('#mdbl-prios input[type="number"]').forEach(inp=>{
-      prefs.priorities[inp.dataset.k] = Number(inp.value);
-    });
-
-    // Persist + apply prefs
+    // Persist + apply
     savePrefs(prefs);
     applyPrefs(prefs);
 
-    // Keys: save local key only if input is editable (i.e., no injector override)
+    // Keys: save local key only if injector didn’t supply one
     const injKey = getInjectorKey();
     const keyInput = panel.querySelector('#mdbl-key-mdb');
-    if (keyInput && !injKey) {
-      setStoredKey((keyInput.value || '').trim());
-    }
+    if (keyInput && !injKey) setStoredKey((keyInput.value||'').trim());
 
-    // Re-render ratings
+    // Optional immediate refresh of our widgets (before reload)
     if (window.MDBL_API && typeof window.MDBL_API.refresh==='function') window.MDBL_API.refresh();
 
-    hide();
+    // Full page reload as requested
+    location.reload();
   });
 
 })();
