@@ -81,19 +81,21 @@ const CACHE_DURATION  = 7 * 24 * 60 * 60 * 1000; // 7 days
 const NS              = 'mdbl_';                 // localStorage prefix
 
 /* 🖼️ LOGOS */
+const BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 const LOGO = {
-  imdb:            'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/IMDb.png',
-  tmdb:            'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/TMDB.png',
-  trakt:           'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/Trakt.png',
-  letterboxd:      'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/letterboxd.png',
-  anilist:         'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/anilist.png',
-  myanimelist:     'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/mal.png',
-  roger:           'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/Roger_Ebert.png',
-  tomatoes:        'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/Rotten_Tomatoes.png',
-  audience:        'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/Rotten_Tomatoes_positive_audience.png',
-  metacritic:      'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/Metacritic.png',
-  metacritic_user: 'https://cdn.jsdelivr.net/gh/Druidblack/jellyfin_ratings@main/logo/mus2.png'
+  imdb: `${BASE}/IMDb.png`,
+  tmdb: `${BASE}/TMDB.png`,
+  trakt: `${BASE}/Trakt.png`,
+  letterboxd: `${BASE}/letterboxd.png`,
+  anilist: `${BASE}/anilist.png`,
+  myanimelist: `${BASE}/mal.png`,
+  roger: `${BASE}/Roger_Ebert.png`,
+  tomatoes: `${BASE}/Rotten_Tomatoes.png`,
+  audience: `${BASE}/Rotten_Tomatoes_positive_audience.png`,
+  metacritic: `${BASE}/Metacritic.png`,
+  metacritic_user: `${BASE}/mus2.png`,
 };
+
 
 /* ======================================================
    MERGE CONFIG FROM INJECTOR (window.MDBL_CFG) IF PRESENT
