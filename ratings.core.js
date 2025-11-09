@@ -1,3 +1,6 @@
+console.info('[Jellyfin Ratings] ratings.core.js boot');
+window.MDBL_STATUS = Object.assign({ version: 'core' }, window.MDBL_STATUS || {});
+
 // ==UserScript==
 // @name         Jellyfin Ratings — Core (v6.4.0)
 // @namespace    https://mdblist.com
