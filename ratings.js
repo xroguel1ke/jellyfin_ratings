@@ -1,18 +1,17 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.3.2 — RT via MDBList + Fallback)
+// @name         Jellyfin Ratings (v6.4.0 — keys via injector, MDBList cache, icons-only)
 // @namespace    https://mdblist.com
-// @version      6.3.2
-// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, colorized; custom inline “Ends at …” (12h/24h + bullet toggle) with strict dedupe; parental rating cloned to start; single MutationObserver; namespaced caches; tidy helpers and styles.
+// @version      6.4.0
+// @description  Unified ratings for Jellyfin 10.11.x (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, RT critic+audience, Roger Ebert, Metacritic critic+user). Normalized 0–100, optional icons-only, colorized; custom inline “Ends at …” with bullet + 12/24h; parental rating cloned to start; single MutationObserver; namespaced caches; tidy helpers and styles. API keys come from injector/localStorage (not GitHub).
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
 /* ======================================================
-   DEFAULT CONFIG (works standalone)
-   You can override any of these via window.MDBL_CFG in your injector.
+   DEFAULT CONFIG (override via window.MDBL_CFG in injector)
 ====================================================== */
 
-/* 🎬 SOURCES (defaults) */
+/* SOURCES */
 const DEFAULT_ENABLE_SOURCES = {
   imdb:                   true,
   tmdb:                   true,
@@ -26,22 +25,23 @@ const DEFAULT_ENABLE_SOURCES = {
   metacritic_user:        true
 };
 
-/* 🎨 DISPLAY (defaults) */
+/* DISPLAY */
 const DEFAULT_DISPLAY = {
-  showPercentSymbol:      true,   // show “%”
-  colorizeRatings:        true,   // colorize ratings
-  colorizeNumbersOnly:    true,   // true: number only; false: number + icon glow
-  align:                  'left', // 'left' | 'center' | 'right'
-  endsAtFormat:           '24h',  // '24h' | '12h'
-  endsAtBullet:           true    // show bullet • before “Ends at …”
+  showPercentSymbol:      true,   // “%”
+  colorizeRatings:        true,   // traffic-light colors
+  colorizeNumbersOnly:    true,   // false => add soft icon glow
+  align:                  'left', // 'left'|'center'|'right'
+  endsAtFormat:           '24h',  // '24h'|'12h'
+  endsAtBullet:           true,   // • before “Ends at …”
+  iconsOnly:              false,  // show icons only (hide numbers)
 };
 
-/* 📏 SPACING (defaults) */
+/* SPACING */
 const DEFAULT_SPACING = {
-  ratingsTopGapPx:        8       // gap between first row and ratings row
+  ratingsTopGapPx:        8
 };
 
-/* 🧮 SORT ORDER (defaults; lower appears earlier) */
+/* SORT ORDER (lower = earlier) */
 const DEFAULT_PRIORITIES = {
   imdb:                     1,
   tmdb:                     2,
@@ -56,7 +56,7 @@ const DEFAULT_PRIORITIES = {
   myanimelist:              11
 };
 
-/* ⚙️ NORMALIZATION (→ 0–100) */
+/* NORMALIZATION (→ 0–100) */
 const SCALE_MULTIPLIER = {
   imdb:                     10,
   tmdb:                      1,
@@ -71,16 +71,15 @@ const SCALE_MULTIPLIER = {
   rotten_tomatoes_audience:  1
 };
 
-/* 🎨 COLORS */
+/* COLORS */
 const COLOR_THRESHOLDS = { green: 75, orange: 50, red: 0 };
 const COLOR_VALUES     = { green: 'limegreen', orange: 'orange', red: 'crimson' };
 
-/* 🔑 API KEY + CACHE (namespaced) */
-const MDBLIST_API_KEY = 'hehfnbo9y8blfyqm1d37ikubl';
-const CACHE_DURATION  = 7 * 24 * 60 * 60 * 1000; // 7 days
-const NS              = 'mdbl_';                 // localStorage prefix
+/* CACHE + NAMESPACE */
+const CACHE_DURATION_MS  = 7 * 24 * 60 * 60 * 1000; // 7 days
+const NS                 = 'mdbl_';                 // localStorage prefix
 
-/* 🖼️ LOGOS (point to your own repo paths) */
+/* ICONS — keep in your repo */
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 const LOGO = {
   imdb:            `${ICON_BASE}/IMDb.png`,
@@ -99,17 +98,40 @@ const LOGO = {
 /* ======================================================
    MERGE CONFIG FROM INJECTOR (window.MDBL_CFG) IF PRESENT
 ====================================================== */
-const __CFG__ = (typeof window !== 'undefined' && window.MDBL_CFG) ? window.MDBL_CFG : {};
-const ENABLE_SOURCES  = Object.assign({}, DEFAULT_ENABLE_SOURCES, __CFG__.sources   || {});
-const DISPLAY         = Object.assign({}, DEFAULT_DISPLAY,        __CFG__.display   || {});
-const SPACING         = Object.assign({}, DEFAULT_SPACING,        __CFG__.spacing   || {});
-const RATING_PRIORITY = Object.assign({}, DEFAULT_PRIORITIES,     __CFG__.priorities|| {});
+const __CFG__          = (typeof window !== 'undefined' && window.MDBL_CFG) ? window.MDBL_CFG : {};
+const ENABLE_SOURCES   = Object.assign({}, DEFAULT_ENABLE_SOURCES, __CFG__.sources    || {});
+const DISPLAY          = Object.assign({}, DEFAULT_DISPLAY,        __CFG__.display    || {});
+const SPACING          = Object.assign({}, DEFAULT_SPACING,        __CFG__.spacing    || {});
+const RATING_PRIORITY  = Object.assign({}, DEFAULT_PRIORITIES,     __CFG__.priorities || {});
 
 /* ======================================================
-   POLYFILL (for browsers without GM_xmlhttpRequest)
+   API KEYS (from injector or localStorage, never in GitHub)
+   - Preferred: window.MDBL_KEYS = { MDBLIST: '...' }
+   - Fallback:  localStorage['mdbl_keys'] = JSON.stringify({ MDBLIST:'...' })
+====================================================== */
+function readKeys() {
+  const fromWindow = (typeof window !== 'undefined' && window.MDBL_KEYS) ? window.MDBL_KEYS : null;
+  if (fromWindow && typeof fromWindow === 'object') return fromWindow;
+
+  try {
+    const j = JSON.parse(localStorage.getItem(`${NS}keys`) || '{}');
+    if (j && typeof j === 'object') return j;
+  } catch {}
+  return {};
+}
+const KEYS = readKeys();
+const MDBLIST_API_KEY = KEYS.MDBLIST || '';
+
+/* expose minimal status for the injector UI/debug */
+window.MDBL_STATUS = {
+  version: '6.4.0',
+  keys: { MDBLIST: !!MDBLIST_API_KEY },
+};
+
+/* ======================================================
+   POLYFILL (for environments without GM_xmlhttpRequest)
 ====================================================== */
 if (typeof GM_xmlhttpRequest === 'undefined') {
-  // If you prefer to avoid third-party proxies entirely, replace this block with a direct fetch-only polyfill.
   const PROXIES = [
     'https://api.allorigins.win/raw?url=',
     'https://api.codetabs.com/v1/proxy?quest='
@@ -145,7 +167,11 @@ const Util = {
   if (document.getElementById('mdblist-styles')) return;
   const style = document.createElement('style');
   style.id = 'mdblist-styles';
-  style.textContent = `.mdblist-rating-container{}`;
+  style.textContent = `
+    .mdblist-rating-container a { text-decoration: none; }
+    .mdblist-rating-container img { height: 1.3em; margin-right: 3px; vertical-align: middle; }
+    .mdblist-rating-container span { font-size: 1em; vertical-align: middle; }
+  `;
   document.head.appendChild(style);
 })();
 
@@ -157,15 +183,12 @@ const Util = {
 
 let currentImdbId = null;
 
-/* -------- Strictly remove any non-inline (ours) “Ends at …” -------- */
+/* -------- Remove any non-inline (ours) “Ends at …” -------- */
 function removeBuiltInEndsAt(){
-  // 1) Remove Jellyfin's secondary line containing Ends at
   document.querySelectorAll('.itemMiscInfo-secondary').forEach(row => {
     const txt = (row.textContent || '');
     if (/\bends\s+at\b/i.test(txt)) row.remove();
   });
-
-  // 2) Remove stray “Ends at” anywhere in panel, EXCEPT our #customEndsAt
   const ours = document.getElementById('customEndsAt');
   document.querySelectorAll('.itemMiscInfo span, .itemMiscInfo div').forEach(el => {
     if (el === ours || (ours && ours.contains(el))) return;
@@ -174,7 +197,7 @@ function removeBuiltInEndsAt(){
   });
 }
 
-/* -------- Parental rating: clone to start, hide original -------- */
+/* -------- Parental rating to start -------- */
 function ensureInlineBadge(){
   const primary = findPrimaryRow();
   if (!primary) return;
@@ -238,11 +261,10 @@ function readAndHideOriginalBadge(){
   return value || null;
 }
 
-/* -------- Custom EndsAt on first row (12h/24h + bullet toggle) -------- */
+/* -------- Custom EndsAt on first row -------- */
 function ensureEndsAtInline(){
   const primary = findPrimaryRow(); if (!primary) return;
 
-  // Locate runtime chip (e.g., "1h 42m", "98m")
   const {node: anchorNode, minutes} = findRuntimeNode(primary);
   if (!anchorNode || !minutes) return;
 
@@ -255,14 +277,8 @@ function ensureEndsAtInline(){
   if (!span){
     span = document.createElement('span');
     span.id = 'customEndsAt';
-    // match first-row style with tight gap
-    span.style.marginLeft    = '6px';
-    span.style.color         = 'inherit';
-    span.style.opacity       = '1';
-    span.style.fontSize      = 'inherit';
-    span.style.fontWeight    = 'inherit';
-    span.style.whiteSpace    = 'nowrap';
-    span.style.display       = 'inline';
+    span.style.marginLeft = '6px';
+    span.style.whiteSpace = 'nowrap';
     if (anchorNode.nextSibling) anchorNode.parentNode.insertBefore(span, anchorNode.nextSibling);
     else anchorNode.parentNode.appendChild(span);
   }
@@ -291,7 +307,6 @@ function findRuntimeNode(primary){
 }
 function parseRuntimeToMinutes(text){
   if (!text) return 0;
-  // "1h 42m" | "1 h 42 m" | "2h" | "98m"
   const re = /(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i;
   const m = text.match(re);
   if (!m) return 0;
@@ -325,7 +340,7 @@ function scanLinks(){
     }
   });
 
-  // Insert ratings containers for each TMDb link
+  // Insert ratings containers next to the first-row info
   [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a=>{
     if (a.dataset.mdblProc === '1') return;
     const m=a.href.match(/themoviedb\.org\/(movie|tv)\/(\d+)/);
@@ -338,7 +353,6 @@ function scanLinks(){
       const ref=b.querySelector('.mediaInfoItem.mediaInfoText.mediaInfoOfficialRating') || b.querySelector('.mediaInfoItem:last-of-type');
       if (!ref) return;
 
-      // Avoid duplicating container right next to ref
       if (ref.nextElementSibling && ref.nextElementSibling.classList?.contains('mdblist-rating-container')) return;
 
       const div = document.createElement('div');
@@ -351,7 +365,7 @@ function scanLinks(){
         align-items:center;
         justify-content:${justify};
         width:calc(100% + 6px);
-        margin-left:-6px;                    /* left nudge (prevents IMDb crop) */
+        margin-left:-6px;
         margin-top:${SPACING.ratingsTopGapPx}px;
         padding-right:${paddingRight};
         box-sizing:border-box;
@@ -377,101 +391,146 @@ function updateRatings(){
   });
 }
 
+/* -------- Rendering helpers -------- */
 function appendRating(container, logo, val, title, key, link){
   if (!Util.validNumber(val)) return;
   const n = Util.normalize(val, key);
   if (!Util.validNumber(n)) return;
   const r = Util.round(n);
-  const disp = DISPLAY.showPercentSymbol ? `${r}%` : `${r}`;
+
+  // icons-only mode -> hide text number
+  const disp = DISPLAY.iconsOnly ? '' : (DISPLAY.showPercentSymbol ? `${r}%` : `${r}`);
   if (container.querySelector(`[data-source="${key}"]`)) return;
 
   const wrap = document.createElement('div');
   wrap.dataset.source = key;
   wrap.style = 'display:inline-flex;align-items:center;margin:0 6px;';
   const a = document.createElement('a');
-  a.href = link; a.target = '_blank'; a.style.textDecoration='none;';
+  a.href = link || '#'; a.target = '_blank';
 
   const img = document.createElement('img');
-  img.src = logo; img.alt = title; img.title = `${title}: ${disp}`;
-  img.style = 'height:1.3em;margin-right:3px;vertical-align:middle;';
+  img.src = logo; img.alt = title; img.title = DISPLAY.iconsOnly ? title : `${title}: ${disp}`;
 
   const s = document.createElement('span');
-  s.textContent = disp; s.style = 'font-size:1em;vertical-align:middle;';
+  s.textContent = disp;
 
   if (DISPLAY.colorizeRatings){
     let col;
     if (r >= COLOR_THRESHOLDS.green) col = COLOR_VALUES.green;
     else if (r >= COLOR_THRESHOLDS.orange) col = COLOR_VALUES.orange;
     else col = COLOR_VALUES.red;
-    if (DISPLAY.colorizeNumbersOnly) s.style.color = col;
-    else { s.style.color = col; img.style.filter = `drop-shadow(0 0 3px ${col})`; }
+    if (!DISPLAY.iconsOnly) {
+      if (DISPLAY.colorizeNumbersOnly) s.style.color = col;
+      else { s.style.color = col; img.style.filter = `drop-shadow(0 0 3px ${col})`; }
+    } else {
+      // icons-only -> apply subtle glow
+      img.style.filter = `drop-shadow(0 0 3px ${col})`;
+    }
   }
 
-  a.append(img,s);
+  a.append(img);
+  if (!DISPLAY.iconsOnly) a.append(s);
   wrap.append(a);
   container.append(wrap);
+
   // sort by configured priority
   [...container.children]
     .sort((a,b)=>(RATING_PRIORITY[a.dataset.source]??999)-(RATING_PRIORITY[b.dataset.source]??999))
     .forEach(el=>container.appendChild(el));
 }
 
-/* -------- Fetch ratings (MDBList primary, extra sources + RT fallback) -------- */
+/* ======================================================
+   FETCH (MDBList + extras) — with caching
+====================================================== */
+function cacheGet(key){
+  try{
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const j = JSON.parse(raw);
+    if (Date.now() - j.time > CACHE_DURATION_MS) return null;
+    return j.data;
+  }catch{ return null; }
+}
+function cacheSet(key, data){
+  try{ localStorage.setItem(key, JSON.stringify({ time:Date.now(), data })); }catch{}
+}
+
 function fetchRatings(tmdbId, imdbId, container, type='movie'){
+  if (!MDBLIST_API_KEY) {
+    // Still allow extras that don’t require this key
+    if (ENABLE_SOURCES.anilist)         fetchAniList(imdbId, container);
+    if (ENABLE_SOURCES.myanimelist)     fetchMAL(imdbId, container);
+    if (ENABLE_SOURCES.rotten_tomatoes) fetchRT(imdbId, container);
+    return;
+  }
+
+  const cacheKey = `${NS}mdb_${type}_${tmdbId}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    renderFromMDBListPayload(cached, imdbId, container, type);
+    // extras
+    if (ENABLE_SOURCES.anilist)         fetchAniList(imdbId, container);
+    if (ENABLE_SOURCES.myanimelist)     fetchMAL(imdbId, container);
+    if (ENABLE_SOURCES.rotten_tomatoes) fetchRT(imdbId, container);
+    return;
+  }
+
   GM_xmlhttpRequest({
     method:'GET',
-    url:`https://api.mdblist.com/tmdb/${type}/${tmdbId}?apikey=${MDBLIST_API_KEY}`,
+    url:`https://api.mdblist.com/tmdb/${type}/${tmdbId}?apikey=${encodeURIComponent(MDBLIST_API_KEY)}`,
     onload:r=>{
       if (r.status !== 200) return;
       let d; try { d = JSON.parse(r.responseText); } catch { return; }
-      const title = d.title || ''; const slug = Util.slug(title);
+      cacheSet(cacheKey, d);
+      renderFromMDBListPayload(d, imdbId, container, type);
 
-      d.ratings?.forEach(rr=>{
-        const s = (rr.source||'').toLowerCase();
-        const v = rr.value;
-
-        if (s.includes('imdb') && ENABLE_SOURCES.imdb)
-          appendRating(container, LOGO.imdb, v, 'IMDb', 'imdb', `https://www.imdb.com/title/${imdbId}/`);
-
-        else if (s.includes('tmdb') && ENABLE_SOURCES.tmdb)
-          appendRating(container, LOGO.tmdb, v, 'TMDb', 'tmdb', `https://www.themoviedb.org/${type}/${tmdbId}`);
-
-        else if (s.includes('trakt') && ENABLE_SOURCES.trakt)
-          appendRating(container, LOGO.trakt, v, 'Trakt', 'trakt', `https://trakt.tv/search/imdb/${imdbId}`);
-
-        else if (s.includes('letterboxd') && ENABLE_SOURCES.letterboxd)
-          appendRating(container, LOGO.letterboxd, v, 'Letterboxd', 'letterboxd', `https://letterboxd.com/imdb/${imdbId}/`);
-
-        // ==== NEW: RT from MDBList when present ====
-        else if ((s === 'tomatoes' || s.includes('rotten_tomatoes')) && ENABLE_SOURCES.rotten_tomatoes) {
-          const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
-          appendRating(container, LOGO.tomatoes, v, 'RT Critic', 'rotten_tomatoes_critic', rtSearch);
-        }
-        else if ((s.includes('popcorn') || s.includes('audience')) && ENABLE_SOURCES.rotten_tomatoes) {
-          const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
-          appendRating(container, LOGO.audience, v, 'RT Audience', 'rotten_tomatoes_audience', rtSearch);
-        }
-        // ============================================
-
-        else if (s === 'metacritic' && ENABLE_SOURCES.metacritic_critic){
-          const seg=(container.dataset.type==='show')?'tv':'movie';
-          const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
-          appendRating(container, LOGO.metacritic, v, 'Metacritic (Critic)', 'metacritic_critic', link);
-        }
-        else if (s.includes('metacritic') && s.includes('user') && ENABLE_SOURCES.metacritic_user){
-          const seg=(container.dataset.type==='show')?'tv':'movie';
-          const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
-          appendRating(container, LOGO.metacritic_user, v, 'Metacritic (User)', 'metacritic_user', link);
-        }
-        else if (s.includes('roger') && ENABLE_SOURCES.roger_ebert)
-          appendRating(container, LOGO.roger, v, 'Roger Ebert', 'roger_ebert', `https://www.rogerebert.com/reviews/${slug}`);
-      });
-
-      // Extra sources + RT fallback
-      if (ENABLE_SOURCES.anilist)           fetchAniList(imdbId, container);
-      if (ENABLE_SOURCES.myanimelist)       fetchMAL(imdbId, container);
-      if (ENABLE_SOURCES.rotten_tomatoes)   fetchRT(imdbId, container); // fallback if MDBList lacks RT
+      if (ENABLE_SOURCES.anilist)         fetchAniList(imdbId, container);
+      if (ENABLE_SOURCES.myanimelist)     fetchMAL(imdbId, container);
+      if (ENABLE_SOURCES.rotten_tomatoes) fetchRT(imdbId, container); // fallback RT
     }
+  });
+}
+
+function renderFromMDBListPayload(d, imdbId, container, type){
+  const title = d.title || ''; const slug = Util.slug(title);
+  d.ratings?.forEach(rr=>{
+    const s = (rr.source||'').toLowerCase();
+    const v = rr.value;
+
+    if (s.includes('imdb') && ENABLE_SOURCES.imdb)
+      appendRating(container, LOGO.imdb, v, 'IMDb', 'imdb', `https://www.imdb.com/title/${imdbId}/`);
+
+    else if (s.includes('tmdb') && ENABLE_SOURCES.tmdb)
+      appendRating(container, LOGO.tmdb, v, 'TMDb', 'tmdb', `https://www.themoviedb.org/${type}/${container.dataset.tmdbId}`);
+
+    else if (s.includes('trakt') && ENABLE_SOURCES.trakt)
+      appendRating(container, LOGO.trakt, v, 'Trakt', 'trakt', `https://trakt.tv/search/imdb/${imdbId}`);
+
+    else if (s.includes('letterboxd') && ENABLE_SOURCES.letterboxd)
+      appendRating(container, LOGO.letterboxd, v, 'Letterboxd', 'letterboxd', `https://letterboxd.com/imdb/${imdbId}/`);
+
+    // RT via MDBList when present
+    else if ((s === 'tomatoes' || s.includes('rotten_tomatoes')) && ENABLE_SOURCES.rotten_tomatoes) {
+      const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
+      appendRating(container, LOGO.tomatoes, v, 'RT Critic', 'rotten_tomatoes_critic', rtSearch);
+    }
+    else if ((s.includes('popcorn') || s.includes('audience')) && ENABLE_SOURCES.rotten_tomatoes) {
+      const rtSearch = title ? `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}` : '#';
+      appendRating(container, LOGO.audience, v, 'RT Audience', 'rotten_tomatoes_audience', rtSearch);
+    }
+
+    else if (s === 'metacritic' && ENABLE_SOURCES.metacritic_critic){
+      const seg=(container.dataset.type==='show')?'tv':'movie';
+      const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
+      appendRating(container, LOGO.metacritic, v, 'Metacritic (Critic)', 'metacritic_critic', link);
+    }
+    else if (s.includes('metacritic') && s.includes('user') && ENABLE_SOURCES.metacritic_user){
+      const seg=(container.dataset.type==='show')?'tv':'movie';
+      const link=slug?`https://www.metacritic.com/${seg}/${slug}`:`https://www.metacritic.com/search/all/${encodeURIComponent(title)}/results`;
+      appendRating(container, LOGO.metacritic_user, v, 'Metacritic (User)', 'metacritic_user', link);
+    }
+    else if (s.includes('roger') && ENABLE_SOURCES.roger_ebert)
+      appendRating(container, LOGO.roger, v, 'Roger Ebert', 'roger_ebert', `https://www.rogerebert.com/reviews/${slug}`);
   });
 }
 
@@ -531,16 +590,8 @@ function fetchMAL(imdbId, container){
 
 function fetchRT(imdbId, container){
   const key = `${NS}rt_${imdbId}`;
-  const cache = localStorage.getItem(key);
-  if (cache){
-    try{
-      const j = JSON.parse(cache);
-      if (Date.now() - j.time < CACHE_DURATION){
-        addRT(container, j.scores);
-        return;
-      }
-    }catch{}
-  }
+  const cache = cacheGet(key);
+  if (cache) return addRT(container, cache);
 
   const q=`SELECT ?rtid WHERE { ?item wdt:P345 "${imdbId}" . ?item wdt:P1258 ?rtid . } LIMIT 1`;
   GM_xmlhttpRequest({
@@ -563,11 +614,11 @@ function fetchRT(imdbId, container){
               const audience = parseFloat(d.audienceScore?.score);
               const scores = { critic, audience, link:url };
               addRT(container, scores);
-              localStorage.setItem(key, JSON.stringify({ time:Date.now(), scores }));
-            }catch(e){ console.error('RT parse error', e); }
+              cacheSet(key, scores);
+            }catch(e){ /* console.error('RT parse error', e); */ }
           }
         });
-      }catch(e){ console.error(e); }
+      }catch(e){ /* console.error(e); */ }
     }
   });
 
@@ -579,18 +630,16 @@ function fetchRT(imdbId, container){
   }
 }
 
-/* -------- Main update pipeline (order matters) -------- */
+/* -------- Main update pipeline -------- */
 function updateAll(){
   try {
-    removeBuiltInEndsAt();     // clear any previous/stray first
-    ensureInlineBadge();       // parental rating (clone to front)
-    ensureEndsAtInline();      // add/update our inline Ends at (first line)
-    removeBuiltInEndsAt();     // purge any duplicates that may have reappeared
-    scanLinks();               // ensure ratings containers exist per row
-    updateRatings();           // fetch & render ratings once per container
-  } catch (e) {
-    // console.debug('mdbl updateAll', e);
-  }
+    removeBuiltInEndsAt();
+    ensureInlineBadge();
+    ensureEndsAtInline();
+    removeBuiltInEndsAt();
+    scanLinks();
+    updateRatings();
+  } catch (e) { /* swallow */ }
 }
 
 /* -------- Observe DOM changes once; debounce updates -------- */
@@ -602,5 +651,11 @@ MDbl.debounce = (fn, wait=150) => { clearTimeout(MDbl.debounceTimer); MDbl.debou
   obs.observe(document.body, { childList:true, subtree:true });
   updateAll(); // initial
 })();
+
+/* -------- Minimal API for injector (optional) -------- */
+window.MDBL_API = {
+  refresh(){ document.querySelectorAll('.mdblist-rating-container').forEach(el=>el.remove()); updateAll(); },
+  setConfig(cfg){ Object.assign(__CFG__, cfg||{}); },
+};
 
 })();
