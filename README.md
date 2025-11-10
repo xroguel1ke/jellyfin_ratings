@@ -28,6 +28,14 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
 
 ---
 
+## Screenshots
+
+![Movie detail view](assets/screenshots/item_details_page.png)
+![Closeup Ratings](assets/screenshots/closeup_with_viewcount.png)
+![Menu Top](assets/screenshots/menu_1.png)
+![Menu Bottom](assets/screenshots/menu_2.png)
+
+
 ## Requirements
 
 * JavaScript Injector Plugin (required)
