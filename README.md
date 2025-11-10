@@ -107,57 +107,6 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
 
 ---
 
-## FAQ
-
-**Do I need a TMDb key?**
-No. Only an **MDBList** key is required.
-
-**Where do I get the MDBList key?**
-Create an account at mdblist and generate an API key, then paste it into the gear‑menu input.
-
-**It doesn’t load on first visit.**
-Make sure your injector snippet points to the correct `ratings.js` URL in your GitHub repo and that the file is public. Hard‑refresh the page to bust cache if you just updated the script.
-
----
-
-## Contributing
-
-Issues and pull requests are welcome. Please keep changes focused and include a short description of what’s improved.
-
----
-
-## License
-
-MIT License
-
-You can include this standard MIT notice in a `LICENSE` file:
-
-```
-MIT License
-
-Copyright (c) YEAR YOUR NAME
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
 ## Acknowledgments
 
 Thanks to the Jellyfin community and the rating providers listed above.
