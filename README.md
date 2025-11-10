@@ -45,8 +45,10 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
 
 ## Quick start (JavaScript Injector)
 
-1. Install a JavaScript‑injector method for Jellyfin (e.g., the **JavaScript Injector** plugin).
-2. Paste the contents of injector_code.js into the injector plugin:
+1. Install the JavaScript‑injector Plugin for Jellyfin.
+   [JavaScript Injector by n00bcodr](https://github.com/n00bcodr/Jellyfin-JavaScript-Injector)
+
+3. Paste the contents of injector_code.js into the injector plugin:
 
    ```html
    /* =========================================================
@@ -101,7 +103,7 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
      }
    })();
    ```
-3. Save and refresh Jellyfin in your browser
+4. Save and refresh Jellyfin in your browser
 
 ---
 
