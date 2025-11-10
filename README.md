@@ -48,60 +48,34 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
 1. Install the JavaScript‑injector Plugin for Jellyfin.
    [JavaScript Injector by n00bcodr](https://github.com/n00bcodr/Jellyfin-JavaScript-Injector)
 
-3. Paste the contents of injector_code.js into the injector plugin:
+3. Paste the contents of injector.js into the injector plugin:
 
    ```html
-   /* =========================================================
-      Jellyfin Ratings — Minimal Injector
-      ---------------------------------------------------------
-      What this loads:
-        • A single userscript from your GitHub that adds unified ratings
-          (IMDb, TMDb, Trakt, Letterboxd, AniList, MAL, Metacritic critic/user,
-          Rotten Tomatoes critic/audience, Roger Ebert) to Jellyfin item pages.
-        • A built-in Settings panel (click any rating number) with:
-          - Source toggles + drag-to-reorder
-          - Display options (colors, %, align, “Ends at” format/bullet)
-          - Local MDBList API key input
-          - Save & Apply (hard refresh)
+/* ================= Jellyfin Ratings — Minimal Injector =================
+   Paste into Jellyfin’s JS Injector.
+   • Set your MDBList key below (client-side only; never in GitHub).
+   • Open Settings by clicking any rating number or the parental rating.
+============================================================================ */
 
-      How to use:
-        1) Paste THIS injector snippet into the Jellyfin JS Injector.
-        2) (Optional) Put your MDBList key below. Keys set here override any local key.
-        3) Visit an item page; click any rating number to open Settings.
+/* 0) Your MDBList API key (required) */
+const MDBLIST_KEY = 'YOUR-API-KEY-HERE';
 
-      Notes:
-        • Your key never goes in GitHub; it stays client-side in the injector/localStorage.
-        • You can leave CONFIG empty—use the in-app menu for tweaks.
-   ========================================================= */
+/* Expose key + mirror to localStorage (overrides any local key) */
+window.MDBL_KEYS = { MDBLIST: MDBLIST_KEY };
+try { localStorage.setItem('mdbl_keys', JSON.stringify(window.MDBL_KEYS)); } catch {}
 
-   /* 1) (Optional) Provide only what you want to pre-set.
-         You can omit the whole block and rely on the Settings panel instead. */
-   window.MDBL_CFG = {
-     // Example initial overrides (everything is also adjustable in Settings):
-     // display: { align: 'left', endsAtFormat: '24h', endsAtBullet: false },
-     // sources: { imdb: true, tmdb: true, trakt: true },
-     // priorities: { imdb:1, tmdb:2, trakt:3 }
-   };
-
-   /* 2) Keys (client-side only). MDBList is the only required one. */
-   window.MDBL_KEYS = {
-     MDBLIST: 'YOUR-API-KEY-HERE'
-   };
-   // Mirror for reloads (harmless if blocked).
-   try { localStorage.setItem('mdbl_keys', JSON.stringify(window.MDBL_KEYS)); } catch {}
-
-   /* 3) Loader — fetch your GitHub script and run it (cache-busted). */
-   (async () => {
-     const RAW_URL = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/ratings.js';
-     try {
-       const res  = await fetch(`${RAW_URL}?t=${Date.now()}`, { cache: 'no-store', mode: 'cors' });
-       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-       const code = await res.text();
-       try { new Function(code)(); } catch { (0, eval)(code); }
-     } catch (err) {
-       console.error('[Jellyfin Ratings] loader failed:', err);
-     }
-   })();
+/* Loader — fetch your GitHub script (cache-busted) and run it */
+(async () => {
+  const RAW_URL = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/ratings.js';
+  try {
+    const res = await fetch(`${RAW_URL}?t=${Date.now()}`, { cache: 'no-store', mode: 'cors' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const code = await res.text();
+    try { new Function(code)(); } catch { (0, eval)(code); } // fallback
+  } catch (err) {
+    console.error('[Jellyfin Ratings] loader failed:', err);
+  }
+})();
    ```
 4. Save and refresh Jellyfin in your browser
 
