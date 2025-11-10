@@ -30,8 +30,8 @@ Add clean, clickable ratings to Jellyfin item pages (movies, shows, and anime) f
 
 ## Requirements
 
-* Jellyfin web interface (recent versions)
-* **MDBList API key** (required)
+* JavaScript Injector Plugin (required)
+* MDBList API key (required)
 
 ---
 
