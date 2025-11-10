@@ -1,0 +1,1 @@
+// Refactored script content placeholder since content is already in canvas.
