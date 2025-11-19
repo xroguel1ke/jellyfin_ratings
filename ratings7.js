@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.4.7 — Max Range 1500px)
+// @name         Jellyfin Ratings (v6.4.8 — Overlap Fix)
 // @namespace    https://mdblist.com
-// @version      6.4.7
-// @description  Unified ratings for Jellyfin. Ratings only (no ends-at/parental logic). Range +/- 1500px.
+// @version      6.4.8
+// @description  Unified ratings for Jellyfin. 1500px range. Hides native 'Ends at' text to prevent overlapping.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v6.4.7 loading...');
+console.log('[Jellyfin Ratings] v6.4.8 loading...');
 
 /* ==========================================================================
    EMERGENCY FIX: Sanitize Storage
@@ -147,6 +147,22 @@ const Util = {
 'use strict';
 
 let currentImdbId=null;
+
+/* --- FIX: Remove Native Overlapping Text --- */
+function hideNativeEndsAt(){
+  // Sucht nach Elementen, die "Ends at" oder "Endet um" enthalten, und versteckt sie.
+  // Dies verhindert den Grafikfehler.
+  const candidates = document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div');
+  candidates.forEach(el => {
+    // Ignoriere unseren eigenen Container
+    if(el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
+    
+    const text = (el.textContent || '').toLowerCase();
+    if (text.includes('ends at') || text.includes('endet um')) {
+       el.style.display = 'none';
+    }
+  });
+}
 
 function hideDefaultRatingsOnce(){
   document.querySelectorAll('.itemMiscInfo.itemMiscInfo-primary').forEach(box=>{
@@ -395,6 +411,7 @@ function fetchRT_HTMLFallback(imdbId, container){
 
 function updateAll(){
   try{
+    hideNativeEndsAt(); // Prevents overlapping default text
     hideDefaultRatingsOnce();
     scanLinks();
     updateRatings();
