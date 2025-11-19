@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v8.7.0 — Settings Icon Moved)
+// @name         Jellyfin Ratings (v9.7.0 — Observer & Compact UI)
 // @namespace    https://mdblist.com
-// @version      8.7.0
-// @description  Settings icon moved next to "Ends at". Improved Menu spacing (symmetric separators, more padding).
+// @version      9.7.0
+// @description  Unified ratings. Uses MutationObserver for instant nav detection (fixes loading issues). Super-compact Header.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v8.7.0 loading...');
+console.log('[Jellyfin Ratings] v9.7.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -31,7 +31,7 @@ const DEFAULTS = {
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         compactLevel: 0,
-        endsAt24h: true // Default to 24h
+        endsAt24h: true
     },
     spacing: { ratingsTopGapPx: 4 },
     priorities: {
@@ -63,7 +63,6 @@ const PALETTE_NAMES = {
 };
 
 const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
-const CACHE_DURATION_RT = 7 * 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 
 const LOGO = {
@@ -89,6 +88,7 @@ const LABEL = {
 
 let CFG = loadConfig();
 let currentImdbId = null;
+let lastUrl = window.location.href;
 
 function loadConfig() {
     try {
@@ -217,7 +217,6 @@ function refreshDomElements() {
         const text = CFG.display.showPercentSymbol ? `${Math.round(score)}%` : `${Math.round(score)}`;
         if (span.textContent !== text) span.textContent = text;
     });
-    // Update Ends At formatting
     updateEndsAt();
 }
 
@@ -227,7 +226,6 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-// Link Fixer
 function fixUrl(url, domain) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -236,35 +234,39 @@ function fixUrl(url, domain) {
 }
 
 document.addEventListener('click', (e) => {
-    // Handle Settings (Text or Icon)
     if (e.target.id === 'customEndsAt' || e.target.closest('#mdbl-settings-trigger')) {
         e.preventDefault(); e.stopPropagation();
         if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
+        else initMenu(); // Try init if missing
     }
 }, true);
 
 function formatTime(minutes) {
     const d = new Date(Date.now() + minutes * 60000);
-    let h = d.getHours();
-    let m = d.getMinutes();
-    const mStr = String(m).padStart(2, '0');
-    
-    if (CFG.display.endsAt24h) {
-        return `${String(h).padStart(2,'0')}:${mStr}`;
-    } else {
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        h = h % 12;
-        h = h ? h : 12;
-        return `${h}:${mStr} ${ampm}`;
+    const opts = CFG.display.endsAt24h 
+        ? { hour: '2-digit', minute: '2-digit', hour12: false } 
+        : { hour: 'numeric', minute: '2-digit', hour12: true };
+    return d.toLocaleTimeString([], opts);
+}
+
+function parseRuntimeToMinutes(text) {
+    if (!text) return 0;
+    let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
+    if (m && (m[1] || m[2])) {
+        const h = parseInt(m[1] || '0', 10);
+        const min = parseInt(m[2] || '0', 10);
+        if (h > 0 || min > 0) return h * 60 + min;
     }
+    m = text.match(/(\d+)\s*(?:m|min)\w*/i);
+    if (m) return parseInt(m[1], 10);
+    return 0;
 }
 
 function updateEndsAt() {
-    // Hide native
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
-        if (t.includes('ends at') || t.includes('endet um') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
+        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
              el.style.display = 'none';
         }
     });
@@ -273,20 +275,13 @@ function updateEndsAt() {
     const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
     if (!primary) return;
 
-    // Parse runtime
     let minutes = 0;
-    const runtimeText = primary.textContent || '';
-    const m = runtimeText.match(/(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
-    if (m) {
-        const h = parseInt(m[1] || '0', 10);
-        const min = parseInt(m[2] || '0', 10);
-        minutes = h * 60 + min;
-    } else {
-        const only = runtimeText.match(/(\d+)\s*m(?:in(?:utes?)?)?/i);
-        if (only) minutes = parseInt(only[1], 10);
+    for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')) {
+        const parsed = parseRuntimeToMinutes((el.textContent || '').trim());
+        if (parsed > 0) { minutes = parsed; break; }
     }
+    if (minutes === 0) minutes = parseRuntimeToMinutes((primary.textContent || '').trim());
     
-    // Cleanup if no runtime
     if (!minutes) {
         if (primary.querySelector('#customEndsAt')) primary.querySelector('#customEndsAt').remove();
         if (primary.querySelector('#mdbl-settings-trigger')) primary.querySelector('#mdbl-settings-trigger').remove();
@@ -296,7 +291,6 @@ function updateEndsAt() {
     const timeStr = formatTime(minutes);
     const content = `Ends at ${timeStr}`;
 
-    // 1. The Text
     let span = primary.querySelector('#customEndsAt');
     if (!span) {
         span = document.createElement('div');
@@ -308,14 +302,12 @@ function updateEndsAt() {
     }
     if (span.textContent !== content) span.textContent = content;
 
-    // 2. The Icon (Right next to text)
     let icon = primary.querySelector('#mdbl-settings-trigger');
     if (!icon) {
         icon = document.createElement('div');
         icon.id = 'mdbl-settings-trigger';
         icon.title = 'Settings';
         icon.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>`;
-        // Insert after text
         if (span.nextSibling) span.parentNode.insertBefore(icon, span.nextSibling);
         else span.parentNode.appendChild(icon);
     }
@@ -433,7 +425,16 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-function scan() {
+// --- IMPROVED SCANNER (OBSERVER + STATELESS CHECK) ---
+function scanDOM() {
+    // Navigation Guard: Reset if URL changed
+    if (window.location.pathname !== lastPath) {
+        lastPath = window.location.pathname;
+        currentImdbId = null; 
+        // Clear old containers to force re-check
+        document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
+    }
+
     updateEndsAt();
 
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
@@ -447,28 +448,42 @@ function scan() {
         }
     }
 
-    [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
-        if (a.dataset.mdblProc === '1') return;
+    // STATELESS CHECK: Ensure every visible movie link has a rating container with the CORRECT ID
+    [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
-            a.dataset.mdblProc = '1';
             
             const wrapper = document.querySelector('.itemMiscInfo');
-            if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
-                const div = document.createElement('div');
-                div.className = 'mdblist-rating-container';
-                div.dataset.type = type;
-                div.dataset.tmdbId = id;
-                wrapper.appendChild(div);
-                fetchRatings(div, id, type);
+            if (wrapper) {
+                // Check for existing container
+                const existing = wrapper.querySelector('.mdblist-rating-container');
+                
+                // If no container, OR container has wrong ID (recycled page), replace it
+                if (!existing || existing.dataset.tmdbId !== id) {
+                    if(existing) existing.remove(); // Kill stale container
+                    
+                    const div = document.createElement('div');
+                    div.className = 'mdblist-rating-container';
+                    div.dataset.type = type;
+                    div.dataset.tmdbId = id;
+                    wrapper.appendChild(div);
+                    fetchRatings(div, id, type);
+                }
             }
         }
     });
 }
 
-setInterval(scan, 500);
+// Observer triggers scan on DOM changes (better than timer for SPAs)
+const observer = new MutationObserver(() => {
+    scanDOM();
+});
+observer.observe(document.body, { childList: true, subtree: true });
+
+// Fallback timer just in case
+setInterval(scanDOM, 1000);
 
 
 /* ==========================================================================
@@ -496,10 +511,20 @@ function initMenu() {
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
         color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
-    #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
-        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; }
-    #mdbl-close { border:none; background:transparent; color:#aaa; font-size:18px; cursor:pointer; padding:4px; border-radius:8px; }
+    
+    /* Compact Header */
+    #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:4px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
+        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; height: 40px; }
+    #mdbl-panel header h3 { margin:0; font-size:14px; font-weight:700; } /* Smaller Font */
+    
+    #mdbl-close { 
+        width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; 
+        background: transparent; border: none; color: #aaa; font-size: 16px; cursor: pointer; 
+        padding: 0; border-radius: 6px; 
+    }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
+    
+    /* Sections & Spacing */
     #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     
@@ -622,13 +647,13 @@ function renderMenuContent(panel) {
     
     let html = `
     <header>
-      <h3>Ratings Settings</h3>
+      <h3>Settings</h3>
       <button id="mdbl-close">✕</button>
     </header>
     <div class="mdbl-section" id="mdbl-sec-keys">
        ${(!INJ_KEYS.MDBLIST && !JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${(JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST)||''}"></div>` : ''}
     </div>
-    <div class="mdbl-section" style="padding-top:16px">
+    <div class="mdbl-section" style="padding-top:24px">
        <div class="mdbl-subtle">Sources (drag to reorder)</div>
        <div id="mdbl-sources"></div>
        <hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0">
@@ -671,7 +696,7 @@ function renderMenuContent(panel) {
             </div>
         </div>
     </div>
-    <div class="mdbl-actions" style="padding-bottom:16px">
+    <div class="mdbl-actions" style="padding-bottom:16px; padding-top:24px">
       <button id="mdbl-btn-reset">Reset</button>
       <button id="mdbl-btn-save" class="primary">Save & Apply</button>
       <div class="mdbl-grow"></div>
@@ -708,7 +733,7 @@ function renderMenuContent(panel) {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
-        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; // Live Update 24h
+        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked;
         
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
         CFG.display.colorBands.orangeMax = parseInt(panel.querySelector('#th_orange').value)||69;
