@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v8.8.0 — Time Fix & Clean UI)
+// @name         Jellyfin Ratings (v9.0.0 — Timezone & Nav Fix)
 // @namespace    https://mdblist.com
-// @version      8.8.0
-// @description  Unified ratings. Fixed "Ends at" calculation (native locale). Alignment removed (Auto-Right). Stable Links.
+// @version      9.0.0
+// @description  Unified ratings. Uses system locale for correct "Ends at" time. URL monitor fixes loading on navigation. 1500px Range.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v8.8.0 loading...');
+console.log('[Jellyfin Ratings] v9.0.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -31,7 +31,7 @@ const DEFAULTS = {
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         compactLevel: 0,
-        endsAt24h: true // Default 24h
+        endsAt24h: true
     },
     spacing: { ratingsTopGapPx: 4 },
     priorities: {
@@ -63,7 +63,6 @@ const PALETTE_NAMES = {
 };
 
 const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
-const CACHE_DURATION_RT = 7 * 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 
 const LOGO = {
@@ -89,6 +88,7 @@ const LABEL = {
 
 let CFG = loadConfig();
 let currentImdbId = null;
+let lastUrl = location.href; // For Navigation Detection
 
 function loadConfig() {
     try {
@@ -98,9 +98,6 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
-        // Clean up old align property if present
-        delete p.display.align;
-        
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -144,7 +141,7 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; /* Always Right Aligned */
+            justify-content: flex-end; 
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -164,8 +161,6 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
-        
-        /* Ends At & Settings Icon */
         #customEndsAt { 
             font-size: inherit; opacity: 0.7; cursor: pointer; 
             margin-left: 10px; display: inline; vertical-align: baseline;
@@ -229,7 +224,6 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-// Link Fixer
 function fixUrl(url, domain) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -246,18 +240,20 @@ document.addEventListener('click', (e) => {
 }, true);
 
 function formatTime(minutes) {
-    const d = new Date(Date.now() + minutes * 60000);
+    // Calculate End Date
+    const now = new Date();
+    const d = new Date(now.getTime() + minutes * 60000);
     
-    // Use native locale formatting for correct time representation
-    const opts = CFG.display.endsAt24h 
-        ? { hour: '2-digit', minute: '2-digit', hour12: false } 
-        : { hour: 'numeric', minute: '2-digit', hour12: true };
-        
-    return d.toLocaleTimeString([], opts);
+    // Use native local time formatting
+    // This guarantees correct timezone
+    return d.toLocaleTimeString([], {
+        hour: CFG.display.endsAt24h ? '2-digit' : 'numeric',
+        minute: '2-digit',
+        hour12: !CFG.display.endsAt24h
+    });
 }
 
 function updateEndsAt() {
-    // Hide native elements
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
@@ -282,7 +278,6 @@ function updateEndsAt() {
         if (only) minutes = parseInt(only[1], 10);
     }
     
-    // Cleanup if no runtime
     if (!minutes) {
         if (primary.querySelector('#customEndsAt')) primary.querySelector('#customEndsAt').remove();
         if (primary.querySelector('#mdbl-settings-trigger')) primary.querySelector('#mdbl-settings-trigger').remove();
@@ -292,7 +287,6 @@ function updateEndsAt() {
     const timeStr = formatTime(minutes);
     const content = `Ends at ${timeStr}`;
 
-    // 1. The Text
     let span = primary.querySelector('#customEndsAt');
     if (!span) {
         span = document.createElement('div');
@@ -304,7 +298,6 @@ function updateEndsAt() {
     }
     if (span.textContent !== content) span.textContent = content;
 
-    // 2. The Icon
     let icon = primary.querySelector('#mdbl-settings-trigger');
     if (!icon) {
         icon = document.createElement('div');
@@ -370,7 +363,7 @@ function renderRatings(container, data, pageImdbId, type) {
                 add('trakt', v, lnk, c, 'Trakt', 'Votes');
             }
             else if (s.includes('letterboxd')) {
-                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
                 add('letterboxd', v, lnk, c, 'Letterboxd', 'Votes');
             }
             else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
@@ -429,6 +422,13 @@ function fetchRatings(container, tmdbId, type) {
 }
 
 function scan() {
+    // --- FIX: NAV DETECTION ---
+    if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        currentImdbId = null; // Force re-scan on navigation
+    }
+    // --------------------------
+
     updateEndsAt();
 
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
@@ -443,22 +443,24 @@ function scan() {
     }
 
     [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
-        if (a.dataset.mdblProc === '1') return;
-        const m = a.href.match(/\/(movie|tv)\/(\d+)/);
-        if (m) {
-            const type = m[1] === 'tv' ? 'show' : 'movie';
-            const id = m[2];
-            a.dataset.mdblProc = '1';
-            
-            const wrapper = document.querySelector('.itemMiscInfo');
-            if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
+        // Allow rescanning if container is missing (nav fix)
+        const wrapper = document.querySelector('.itemMiscInfo');
+        if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
+             // Proceed even if mdblProc is set, to re-inject
+             const m = a.href.match(/\/(movie|tv)\/(\d+)/);
+             if (m) {
+                const type = m[1] === 'tv' ? 'show' : 'movie';
+                const id = m[2];
+                
                 const div = document.createElement('div');
                 div.className = 'mdblist-rating-container';
                 div.dataset.type = type;
                 div.dataset.tmdbId = id;
                 wrapper.appendChild(div);
                 fetchRatings(div, id, type);
-            }
+                
+                a.dataset.mdblProc = '1';
+             }
         }
     });
 }
