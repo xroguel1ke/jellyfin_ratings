@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.7.0 — Observer & Compact UI)
+// @name         Jellyfin Ratings (v9.6.0 — Stateless Scan & Layout)
 // @namespace    https://mdblist.com
-// @version      9.7.0
-// @description  Unified ratings. Uses MutationObserver for instant nav detection (fixes loading issues). Super-compact Header.
+// @version      9.6.0
+// @description  Fixes navigation loading by removing 'processed' flags and checking live DOM state. Compact Header.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v9.7.0 loading...');
+console.log('[Jellyfin Ratings] v9.6.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -88,7 +88,7 @@ const LABEL = {
 
 let CFG = loadConfig();
 let currentImdbId = null;
-let lastUrl = window.location.href;
+let lastPath = window.location.pathname;
 
 function loadConfig() {
     try {
@@ -236,8 +236,12 @@ function fixUrl(url, domain) {
 document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt' || e.target.closest('#mdbl-settings-trigger')) {
         e.preventDefault(); e.stopPropagation();
-        if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
-        else initMenu(); // Try init if missing
+        if(window.MDBL_OPEN_SETTINGS) {
+             window.MDBL_OPEN_SETTINGS();
+        } else {
+             initMenu();
+             if(window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
+        }
     }
 }, true);
 
@@ -425,16 +429,15 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// --- IMPROVED SCANNER (OBSERVER + STATELESS CHECK) ---
-function scanDOM() {
-    // Navigation Guard: Reset if URL changed
+function scan() {
+    // --- NAVIGATION GUARD (Aggressive Mode) ---
+    // Reset everything if URL path changed since last check
     if (window.location.pathname !== lastPath) {
         lastPath = window.location.pathname;
         currentImdbId = null; 
-        // Clear old containers to force re-check
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     }
-
+    
     updateEndsAt();
 
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
@@ -448,7 +451,7 @@ function scanDOM() {
         }
     }
 
-    // STATELESS CHECK: Ensure every visible movie link has a rating container with the CORRECT ID
+    // Use Stateless Check: Only inject if this specific ID is missing from wrapper
     [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
@@ -457,13 +460,13 @@ function scanDOM() {
             
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper) {
-                // Check for existing container
+                // "Stateless" check: Does the wrapper already have a container for THIS id?
+                // If not, or if it has a container for a WRONG id (recycled), fix it.
                 const existing = wrapper.querySelector('.mdblist-rating-container');
                 
-                // If no container, OR container has wrong ID (recycled page), replace it
                 if (!existing || existing.dataset.tmdbId !== id) {
-                    if(existing) existing.remove(); // Kill stale container
-                    
+                    if(existing) existing.remove(); // Remove stale recycled container
+
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
@@ -476,14 +479,7 @@ function scanDOM() {
     });
 }
 
-// Observer triggers scan on DOM changes (better than timer for SPAs)
-const observer = new MutationObserver(() => {
-    scanDOM();
-});
-observer.observe(document.body, { childList: true, subtree: true });
-
-// Fallback timer just in case
-setInterval(scanDOM, 1000);
+setInterval(scan, 500);
 
 
 /* ==========================================================================
@@ -511,20 +507,14 @@ function initMenu() {
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
         color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
-    
-    /* Compact Header */
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:4px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
-        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; height: 40px; }
-    #mdbl-panel header h3 { margin:0; font-size:14px; font-weight:700; } /* Smaller Font */
-    
+        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; }
     #mdbl-close { 
-        width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; 
-        background: transparent; border: none; color: #aaa; font-size: 16px; cursor: pointer; 
+        width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; 
+        background: transparent; border: none; color: #aaa; font-size: 18px; cursor: pointer; 
         padding: 0; border-radius: 6px; 
     }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
-    
-    /* Sections & Spacing */
     #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     
@@ -733,7 +723,7 @@ function renderMenuContent(panel) {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
-        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked;
+        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; // Live Update 24h
         
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
         CFG.display.colorBands.orangeMax = parseInt(panel.querySelector('#th_orange').value)||69;
