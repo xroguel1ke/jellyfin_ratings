@@ -1,31 +1,27 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.4.5 — Emergency Reset & Debug)
+// @name         Jellyfin Ratings (v6.4.6 — Clean UI & Ext. Range)
 // @namespace    https://mdblist.com
-// @version      6.4.5
-// @description  Unified ratings for Jellyfin with XY positioning. Includes auto-reset for broken layouts.
+// @version      6.4.6
+// @description  Unified ratings for Jellyfin. Removed parental/24h toggle logic. Ext. range +/- 1000px. Styling fixes.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v6.4.5 loading...');
+console.log('[Jellyfin Ratings] v6.4.6 loading...');
 
 /* ==========================================================================
-   EMERGENCY FIX: Sanitize Storage on Boot
-   Entfernt defekte Koordinaten aus dem Speicher, falls vorhanden.
+   EMERGENCY FIX: Sanitize Storage
 ========================================================================== */
 try {
     const rawKey = 'mdbl_prefs';
     const raw = localStorage.getItem(rawKey);
     if (raw) {
         const p = JSON.parse(raw);
-        // Wenn Positionen ungültig sind (NaN), lösche die Einstellungen komplett
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
-            console.warn('[Jellyfin Ratings] Defekte Einstellungen gefunden. Setze zurück...');
             localStorage.removeItem(rawKey);
         }
     }
 } catch (e) { localStorage.removeItem('mdbl_prefs'); }
-
 
 /* ---------- Defaults ---------- */
 const DEFAULT_ENABLE_SOURCES = {
@@ -40,13 +36,13 @@ const DEFAULT_DISPLAY = {
   colorIcons:false,
   posX: 0,
   posY: 0,
-  endsAtFormat:'24h',
-  endsAtBullet:false,
+  // endsAtFormat entfernt aus UI, hardcoded 24h im Code
   colorBands:{ redMax:50, orangeMax:69, ygMax:79 },
   colorChoice:{ red:0, orange:2, yg:3, mg:0 },
   compactLevel:0
 };
 
+/* === Color Swatches & Helpers === */
 const COLOR_SWATCHES = {
   red:    ['#e53935','#f44336','#d32f2f','#c62828'],
   orange: ['#fb8c00','#f39c12','#ffa726','#ef6c00'],
@@ -99,14 +95,13 @@ const DISPLAY         = Object.assign({}, DEFAULT_DISPLAY,        __CFG__.displa
 const SPACING         = Object.assign({}, DEFAULT_SPACING,        __CFG__.spacing   || {});
 const RATING_PRIORITY = Object.assign({}, DEFAULT_PRIORITIES,     __CFG__.priorities|| {});
 
-// Force defaults if values are broken
-if(isNaN(parseInt(DISPLAY.posX))) DISPLAY.posX = 0;
-if(isNaN(parseInt(DISPLAY.posY))) DISPLAY.posY = 0;
+// Validierung
+if(isNaN(parseFloat(DISPLAY.posX))) DISPLAY.posX = 0;
+if(isNaN(parseFloat(DISPLAY.posY))) DISPLAY.posY = 0;
 
 const INJ_KEYS     = (window.MDBL_KEYS||{});
 const LS_KEYS_JSON = localStorage.getItem(`${NS}keys`);
 const LS_KEYS      = LS_KEYS_JSON ? (JSON.parse(LS_KEYS_JSON)||{}) : {};
-// Key from your original upload used as fallback
 const MDBLIST_API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || 'hehfnbo9y8blfyqm1d37ikubl');
 
 /* ---------- Polyfill ---------- */
@@ -138,7 +133,11 @@ const Util = {
   if (document.getElementById('mdblist-styles')) return;
   const style=document.createElement('style');
   style.id='mdblist-styles';
-  style.textContent=`.mdblist-rating-container{}`;
+  // Fix overflow issues on common Jellyfin containers to prevent clipping
+  style.textContent=`
+    .mdblist-rating-container{ pointer-events: auto; }
+    .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
+  `;
   document.head.appendChild(style);
 })();
 
@@ -162,34 +161,6 @@ function removeBuiltInEndsAt(){
 }
 
 const findPrimaryRow=()=>document.querySelector('.itemMiscInfo.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo');
-function findYearChip(primary){
-  for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')){
-    const t=(el.textContent||'').trim(); if (/^\d{4}$/.test(t)) return el;
-  } return null;
-}
-function readAndHideOriginalBadge(){
-  let original=document.querySelector('.mediaInfoItem.mediaInfoText.mediaInfoOfficialRating')
-     || document.querySelector('.mediaInfoItem.mediaInfoText[data-type="officialRating"]');
-  if(!original){
-    original=[...document.querySelectorAll('.itemMiscInfo .mediaInfoItem, .itemMiscInfo .mediaInfoText, .itemMiscInfo span')]
-      .find(el=>{ const t=(el.textContent||'').trim(); return /^[A-Z0-9][A-Z0-9\-+]{0,5}$/.test(t)&&!/^\d{4}$/.test(t); })||null;
-  }
-  if(!original) return null;
-  const v=(original.textContent||'').trim(); original.style.display='none'; return v||null;
-}
-
-function ensureInlineBadge(){
-  const primary=findPrimaryRow(); if(!primary) return;
-  const ratingValue=readAndHideOriginalBadge(); if(!ratingValue) return;
-  if (primary.querySelector('#mdblistInlineParental')) return;
-  const before=findYearChip(primary)||primary.firstChild;
-  const badge=document.createElement('span');
-  badge.id='mdblistInlineParental'; badge.textContent=ratingValue;
-  Object.assign(badge.style,{display:'inline-flex',alignItems:'center',justifyContent:'center',padding:'2px 6px',borderRadius:'6px',
-    fontWeight:'600',fontSize:'0.9em',lineHeight:'1',background:'var(--theme-primary-color, rgba(255,255,255,0.12))',
-    color:'var(--theme-text-color,#ddd)',marginRight:'10px',whiteSpace:'nowrap',flex:'0 0 auto',verticalAlign:'middle'});
-  (before&&before.parentNode)?before.parentNode.insertBefore(badge,before):primary.insertBefore(badge,primary.firstChild);
-}
 
 function parseRuntimeToMinutes(text){
   if(!text) return 0;
@@ -209,9 +180,8 @@ function ensureEndsAtInline(){
   const primary=findPrimaryRow(); if(!primary) return;
   const {node,minutes}=findRuntimeNode(primary); if(!node||!minutes) return;
   const end=new Date(Date.now()+minutes*60000);
-  const timeStr=(DISPLAY.endsAtFormat==='12h')?(()=>{
-    let h=end.getHours(); const m=Util.pad(end.getMinutes()), suf=h>=12?'PM':'AM'; h=h%12||12; return `${h}:${m} ${suf}`;
-  })():`${Util.pad(end.getHours())}:${Util.pad(end.getMinutes())}`;
+  // Forced 24h format
+  const timeStr=`${Util.pad(end.getHours())}:${Util.pad(end.getMinutes())}`;
   const content=`Ends at ${timeStr}`;
   let span=primary.querySelector('#customEndsAt');
   if(!span){
@@ -243,16 +213,11 @@ function scanLinks(){
       
       const div=document.createElement('div'); div.className='mdblist-rating-container';
       
-      // --- DEBUG STYLE: RED BORDER ---
-      // Hilft zu sehen, ob der Container überhaupt da ist.
-      div.style.border = "2px solid red"; 
-      div.title = "DEBUG: Container loaded";
-      // -------------------------------
-
       let px = parseFloat(DISPLAY.posX); if(isNaN(px)) px=0;
       let py = parseFloat(DISPLAY.posY); if(isNaN(py)) py=0;
 
-      div.style.cssText += `display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;width:calc(100% + 6px);margin-left:-6px;margin-top:${SPACING.ratingsTopGapPx}px;padding-right:0;box-sizing:border-box;transform:translate(${px}px,${py}px);z-index:9999;position:relative;`;
+      // High Z-index to prevent hiding behind other elements
+      div.style.cssText += `display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;width:calc(100% + 6px);margin-left:-6px;margin-top:${SPACING.ratingsTopGapPx}px;padding-right:0;box-sizing:border-box;transform:translate(${px}px,${py}px);z-index:99999;position:relative;pointer-events:auto;`;
 
       Object.assign(div.dataset,{type, tmdbId, mdblFetched:'0'}); ref.insertAdjacentElement('afterend',div);
     });
@@ -324,12 +289,7 @@ function fetchRatings(tmdbId, imdbId, container, type='movie'){
     method:'GET',
     url:`https://api.mdblist.com/tmdb/${type}/${tmdbId}?apikey=${MDBLIST_API_KEY}`,
     onload:r=>{
-      if(r.status!==200) {
-          console.error('MDBList API Error:', r.status);
-          // Debug Text falls API failt
-          const err = document.createElement('span'); err.style.color='red'; err.textContent='[API Err]'; container.appendChild(err);
-          return;
-      }
+      if(r.status!==200) { console.error('MDBList API Error:', r.status); return; }
       let d; try{ d=JSON.parse(r.responseText); }catch{ return; }
       const title=d.title||''; const slug=Util.slug(title);
 
@@ -480,7 +440,7 @@ function fetchRT_HTMLFallback(imdbId, container){
 function updateAll(){
   try{
     removeBuiltInEndsAt();
-    ensureInlineBadge();
+    // ensureInlineBadge(); <-- REMOVED (User Request)
     ensureEndsAtInline();
     removeBuiltInEndsAt();
     scanLinks();
@@ -596,6 +556,18 @@ updateAll();
   #mdbl-panel[data-compact="1"] .mdbl-num{ width:4ch; font-size:13px; }
   #mdbl-panel[data-compact="1"] .sw{ width:16px; height:16px; }
   #mdbl-panel[data-compact="1"] hr{ margin:6px 0; }
+  
+  /* NEW: Style for the position number inputs to match bottom inputs */
+  #mdbl-panel input.mdbl-pos-input {
+    background: #121317;
+    color: #eaeaea;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 10px;
+    padding: 0 8px;
+    height: 32px;
+    text-align: center;
+    width: 50px;
+  }
 `;
   if (!document.getElementById('mdbl-settings-css')){
     const style=document.createElement('style'); style.id='mdbl-settings-css'; style.textContent=css; document.head.appendChild(style);
@@ -743,6 +715,7 @@ updateAll();
     enableDnD(sList);
 
     const dWrap=panel.querySelector('#mdbl-sec-display');
+    // --- Updated UI: inputs now use class mdbl-pos-input for consistent styling ---
     dWrap.innerHTML=`
       <div class="mdbl-subtle">Display</div>
       <div class="mdbl-row"><span>Color numbers</span><input type="checkbox" id="d_colorNumbers" ${DISPLAY.colorNumbers?'checked':''}></div>
@@ -752,19 +725,17 @@ updateAll();
       <div class="mdbl-row wide">
         <span>Position X (px)</span>
         <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
-          <input type="range" id="d_posX_range" min="-300" max="300" value="${DISPLAY.posX||0}" style="flex:1; cursor:pointer;">
-          <input type="number" id="d_posX" value="${DISPLAY.posX||0}" class="mdbl-num" style="width:50px;">
+          <input type="range" id="d_posX_range" min="-1000" max="1000" value="${DISPLAY.posX||0}" style="flex:1; cursor:pointer;">
+          <input type="number" id="d_posX" value="${DISPLAY.posX||0}" class="mdbl-pos-input">
         </div>
       </div>
       <div class="mdbl-row wide">
         <span>Position Y (px)</span>
         <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
-          <input type="range" id="d_posY_range" min="-100" max="100" value="${DISPLAY.posY||0}" style="flex:1; cursor:pointer;">
-          <input type="number" id="d_posY" value="${DISPLAY.posY||0}" class="mdbl-num" style="width:50px;">
+          <input type="range" id="d_posY_range" min="-1000" max="1000" value="${DISPLAY.posY||0}" style="flex:1; cursor:pointer;">
+          <input type="number" id="d_posY" value="${DISPLAY.posY||0}" class="mdbl-pos-input">
         </div>
       </div>
-
-      <div class="mdbl-row"><span>Enable 24h format</span><input type="checkbox" id="d_ends24h" ${DISPLAY.endsAtFormat==='24h'?'checked':''}></div>
 
       <hr>
       <div class="mdbl-subtle">Color bands &amp; palette</div>
@@ -891,7 +862,7 @@ updateAll();
       mg: +(panel.querySelector('#col_mg')?.value||0)
     };
 
-    prefs.display.endsAtFormat = panel.querySelector('#d_ends24h').checked ? '24h' : '12h';
+    // endsAtFormat hardcoded removed from UI logic saving
 
     savePrefs(prefs); applyPrefs(prefs);
     const injKey=getInjectorKey(); const keyInput=panel.querySelector('#mdbl-key-mdb');
