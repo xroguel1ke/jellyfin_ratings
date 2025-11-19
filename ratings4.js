@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.0.0 — Timezone & Nav Fix)
+// @name         Jellyfin Ratings (v9.0.0 — German Runtime & Nav Fix)
 // @namespace    https://mdblist.com
 // @version      9.0.0
-// @description  Unified ratings. Uses system locale for correct "Ends at" time. URL monitor fixes loading on navigation. 1500px Range.
+// @description  Unified ratings. Fixes "Ends at" for German locales (Std/Min). Fixes loading on page navigation. Auto-Right Alignment.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
@@ -88,7 +88,7 @@ const LABEL = {
 
 let CFG = loadConfig();
 let currentImdbId = null;
-let lastUrl = location.href; // For Navigation Detection
+let lastUrl = window.location.href; // Track URL changes
 
 function loadConfig() {
     try {
@@ -98,6 +98,8 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
+        delete p.display.align;
+        
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -141,7 +143,7 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; 
+            justify-content: flex-end; /* Always Right Aligned */
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -161,6 +163,8 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
+        
+        /* Ends At & Settings Icon */
         #customEndsAt { 
             font-size: inherit; opacity: 0.7; cursor: pointer; 
             margin-left: 10px; display: inline; vertical-align: baseline;
@@ -224,6 +228,7 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
+// Link Fixer
 function fixUrl(url, domain) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -240,24 +245,41 @@ document.addEventListener('click', (e) => {
 }, true);
 
 function formatTime(minutes) {
-    // Calculate End Date
-    const now = new Date();
-    const d = new Date(now.getTime() + minutes * 60000);
+    const d = new Date(Date.now() + minutes * 60000);
     
-    // Use native local time formatting
-    // This guarantees correct timezone
-    return d.toLocaleTimeString([], {
-        hour: CFG.display.endsAt24h ? '2-digit' : 'numeric',
-        minute: '2-digit',
-        hour12: !CFG.display.endsAt24h
-    });
+    const opts = CFG.display.endsAt24h 
+        ? { hour: '2-digit', minute: '2-digit', hour12: false } 
+        : { hour: 'numeric', minute: '2-digit', hour12: true };
+        
+    return d.toLocaleTimeString([], opts);
 }
 
+// --- ROBUST RUNTIME PARSER (MULTI-LANGUAGE) ---
+function parseRuntimeToMinutes(text) {
+    if (!text) return 0;
+    
+    // 1. Try standard "1 hr 30 min" or "1h 30m"
+    let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
+    if (m && (m[1] || m[2])) {
+        const h = parseInt(m[1] || '0', 10);
+        const min = parseInt(m[2] || '0', 10);
+        if (h > 0 || min > 0) return h * 60 + min;
+    }
+
+    // 2. Try just "90 min"
+    m = text.match(/(\d+)\s*(?:m|min)\w*/i);
+    if (m) return parseInt(m[1], 10);
+
+    return 0;
+}
+// ---------------------------------------------
+
 function updateEndsAt() {
+    // Hide native
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
-        if (t.includes('ends at') || t.includes('endet um') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
+        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
              el.style.display = 'none';
         }
     });
@@ -266,18 +288,18 @@ function updateEndsAt() {
     const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
     if (!primary) return;
 
+    // Find runtime in child nodes
     let minutes = 0;
-    const runtimeText = primary.textContent || '';
-    const m = runtimeText.match(/(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
-    if (m) {
-        const h = parseInt(m[1] || '0', 10);
-        const min = parseInt(m[2] || '0', 10);
-        minutes = h * 60 + min;
-    } else {
-        const only = runtimeText.match(/(\d+)\s*m(?:in(?:utes?)?)?/i);
-        if (only) minutes = parseInt(only[1], 10);
+    for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')) {
+        const parsed = parseRuntimeToMinutes((el.textContent || '').trim());
+        if (parsed > 0) { minutes = parsed; break; }
+    }
+    // Fallback: Parse full text
+    if (minutes === 0) {
+        minutes = parseRuntimeToMinutes((primary.textContent || '').trim());
     }
     
+    // Cleanup if no runtime
     if (!minutes) {
         if (primary.querySelector('#customEndsAt')) primary.querySelector('#customEndsAt').remove();
         if (primary.querySelector('#mdbl-settings-trigger')) primary.querySelector('#mdbl-settings-trigger').remove();
@@ -422,13 +444,13 @@ function fetchRatings(container, tmdbId, type) {
 }
 
 function scan() {
-    // --- FIX: NAV DETECTION ---
-    if (location.href !== lastUrl) {
-        lastUrl = location.href;
-        currentImdbId = null; // Force re-scan on navigation
+    // --- FORCE RELOAD ON NAV CHANGE ---
+    if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        currentImdbId = null; 
+        document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     }
-    // --------------------------
-
+    
     updateEndsAt();
 
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
@@ -443,24 +465,22 @@ function scan() {
     }
 
     [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
-        // Allow rescanning if container is missing (nav fix)
-        const wrapper = document.querySelector('.itemMiscInfo');
-        if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
-             // Proceed even if mdblProc is set, to re-inject
-             const m = a.href.match(/\/(movie|tv)\/(\d+)/);
-             if (m) {
-                const type = m[1] === 'tv' ? 'show' : 'movie';
-                const id = m[2];
-                
+        if (a.dataset.mdblProc === '1') return;
+        const m = a.href.match(/\/(movie|tv)\/(\d+)/);
+        if (m) {
+            const type = m[1] === 'tv' ? 'show' : 'movie';
+            const id = m[2];
+            a.dataset.mdblProc = '1';
+            
+            const wrapper = document.querySelector('.itemMiscInfo');
+            if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
                 const div = document.createElement('div');
                 div.className = 'mdblist-rating-container';
                 div.dataset.type = type;
                 div.dataset.tmdbId = id;
                 wrapper.appendChild(div);
                 fetchRatings(div, id, type);
-                
-                a.dataset.mdblProc = '1';
-             }
+            }
         }
     });
 }
@@ -705,7 +725,7 @@ function renderMenuContent(panel) {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
-        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; // Live Update 24h
+        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked;
         
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
         CFG.display.colorBands.orangeMax = parseInt(panel.querySelector('#th_orange').value)||69;
