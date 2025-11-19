@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.3.0 — Smart ID Check)
+// @name         Jellyfin Ratings (v9.4.0 — Nav Guard & Style Polish)
 // @namespace    https://mdblist.com
-// @version      9.3.0
-// @description  Unified ratings. Fixes loading on navigation by comparing IDs (no flags). Re-adds Theme Color Sync.
+// @version      9.4.0
+// @description  Fixes intermittent loading on navigation. Square close button. Reduced header height. Theme Sync active.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v9.3.0 loading...');
+console.log('[Jellyfin Ratings] v9.4.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -88,12 +88,14 @@ const LABEL = {
 
 let CFG = loadConfig();
 let currentImdbId = null;
+let lastPath = window.location.pathname; // Track path for nav detection
 
 function loadConfig() {
     try {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
+        // Sanity checks
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
@@ -138,14 +140,16 @@ function updateGlobalStyles() {
     document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
 
     let rules = `
+        /* Container */
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; /* Auto-Right Anchor */
+            justify-content: flex-end; 
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
             z-index: 99999; position: relative; pointer-events: auto; flex-shrink: 0;
         }
+        /* Items */
         .mdbl-rating-item {
             display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
             text-decoration: none;
@@ -159,9 +163,10 @@ function updateGlobalStyles() {
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
+        
+        /* Visibility & Helpers */
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
         
-        /* Ends At & Settings Icon */
         #customEndsAt { 
             font-size: inherit; opacity: 0.7; cursor: pointer; 
             margin-left: 10px; display: inline; vertical-align: baseline;
@@ -236,11 +241,9 @@ document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt' || e.target.closest('#mdbl-settings-trigger')) {
         e.preventDefault(); e.stopPropagation();
         
-        // --- RE-ADD THEME SYNC HERE ---
         if(window.MDBL_OPEN_SETTINGS) {
              window.MDBL_OPEN_SETTINGS();
         } else {
-             // If not ready, try init
              initMenu();
              if(window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
         }
@@ -373,7 +376,7 @@ function renderRatings(container, data, pageImdbId, type) {
                 add('trakt', v, lnk, c, 'Trakt', 'Votes');
             }
             else if (s.includes('letterboxd')) {
-                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
                 add('letterboxd', v, lnk, c, 'Letterboxd', 'Votes');
             }
             else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
@@ -432,34 +435,43 @@ function fetchRatings(container, tmdbId, type) {
 }
 
 function scan() {
-    // Update Ends At repeatedly to ensure it stays
+    // --- NAVIGATION GUARD ---
+    // Detects if URL changed and forces a cleanup to handle SPA navigation properly
+    if (window.location.pathname !== lastPath) {
+        lastPath = window.location.pathname;
+        currentImdbId = null; 
+        document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
+        // FORCE RESET PROCESSED FLAGS
+        document.querySelectorAll('a[data-mdbl-proc]').forEach(el => delete el.dataset.mdblProc);
+    }
+    
     updateEndsAt();
 
-    // 1. Capture Current IMDb ID if visible
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
     if (imdbLink) {
         const m = imdbLink.href.match(/tt\d+/);
-        if (m) currentImdbId = m[0];
+        if (m) {
+            if (m[0] !== currentImdbId) {
+                currentImdbId = m[0];
+                document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
+            }
+        }
     }
 
-    // 2. Scan for TMDb buttons
-    const buttons = document.querySelectorAll('a[href*="themoviedb.org/"]');
-    buttons.forEach(a => {
-        const m = a.href.match(/\/(movie|tv)\/(\d+)/);
-        if (!m) return;
-
-        const type = m[1] === 'tv' ? 'show' : 'movie';
-        const id = m[2];
+    // Use loose selector again (v8.1.0 logic) for maximum compatibility
+    [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
+        if (a.dataset.mdblProc === '1') return;
         
-        // Check if we already have a container for THIS specific ID
-        // This bypasses the 'mdblProc' flag issues on navigation
-        const wrapper = document.querySelector('.itemMiscInfo');
-        if (wrapper) {
-            const existing = wrapper.querySelector(`.mdblist-rating-container[data-tmdb-id="${id}"]`);
-            if (!existing) {
-                // Clean up old ones (from previous pages)
-                wrapper.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
-                
+        const m = a.href.match(/\/(movie|tv)\/(\d+)/);
+        if (m) {
+            const type = m[1] === 'tv' ? 'show' : 'movie';
+            const id = m[2];
+            
+            const wrapper = document.querySelector('.itemMiscInfo');
+            if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
+                // Mark processed only on success
+                a.dataset.mdblProc = '1';
+
                 const div = document.createElement('div');
                 div.className = 'mdblist-rating-container';
                 div.dataset.type = type;
@@ -478,6 +490,7 @@ setInterval(scan, 500);
    4. SETTINGS MENU (INIT)
 ========================================================================== */
 let dragSrc = null;
+let themeColor = '#2a6df4';
 
 function getJellyfinColor() {
     const rootVar = getComputedStyle(document.documentElement).getPropertyValue('--theme-primary-color').trim();
@@ -498,9 +511,13 @@ function initMenu() {
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
         color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
-    #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
+    #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:8px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
         display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; }
-    #mdbl-close { border:none; background:transparent; color:#aaa; font-size:18px; cursor:pointer; padding:4px; border-radius:8px; }
+    #mdbl-close { 
+        width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; 
+        background: transparent; border: none; color: #aaa; font-size: 18px; cursor: pointer; 
+        padding: 0; border-radius: 6px; 
+    }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
     #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
