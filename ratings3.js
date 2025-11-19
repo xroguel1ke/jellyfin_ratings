@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v7.3.1 — Menu Rescue)
+// @name         Jellyfin Ratings (v7.4.0 — Design Restored & Live Fixed)
 // @namespace    https://mdblist.com
-// @version      7.3.1
-// @description  Unified ratings. Fixes broken menu opening. Live Preview & Caching active. Range +/- 1000px.
+// @version      7.4.0
+// @description  Restores v7.2.0 UI exactly. Adds functional Live Preview for all settings. Fixed Compact Mode.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v7.3.1 loading...');
+console.log('[Jellyfin Ratings] v7.4.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -62,16 +62,31 @@ const PALETTE_NAMES = {
     mg:     ['Emerald', 'Leaf Green', 'Forest', 'Mint']
 };
 
-const CACHE_DURATION_API = 24 * 60 * 60 * 1000; // 24h
-const CACHE_DURATION_RT = 7 * 24 * 60 * 60 * 1000; // 7d
-
+const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
+const CACHE_DURATION_RT = 7 * 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
+
+// Icon Map matching internal keys
 const LOGO = {
-    imdb: `${ICON_BASE}/IMDb.png`, tmdb: `${ICON_BASE}/TMDB.png`, trakt: `${ICON_BASE}/Trakt.png`,
-    letterboxd: `${ICON_BASE}/letterboxd.png`, anilist: `${ICON_BASE}/anilist.png`, myanimelist: `${ICON_BASE}/mal.png`,
-    roger_ebert: `${ICON_BASE}/Roger_Ebert.png`, rotten_tomatoes_critic: `${ICON_BASE}/Rotten_Tomatoes.png`,
-    rotten_tomatoes_audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`, metacritic_critic: `${ICON_BASE}/Metacritic.png`,
+    imdb: `${ICON_BASE}/IMDb.png`,
+    tmdb: `${ICON_BASE}/TMDB.png`,
+    trakt: `${ICON_BASE}/Trakt.png`,
+    letterboxd: `${ICON_BASE}/letterboxd.png`,
+    anilist: `${ICON_BASE}/anilist.png`,
+    myanimelist: `${ICON_BASE}/mal.png`,
+    roger_ebert: `${ICON_BASE}/Roger_Ebert.png`,
+    rotten_tomatoes_critic: `${ICON_BASE}/Rotten_Tomatoes.png`,
+    rotten_tomatoes_audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
+    metacritic_critic: `${ICON_BASE}/Metacritic.png`,
     metacritic_user: `${ICON_BASE}/mus2.png`,
+};
+
+// Labels for Menu
+const LABEL = {
+    imdb: 'IMDb', tmdb: 'TMDb', trakt: 'Trakt', letterboxd: 'Letterboxd',
+    rotten_tomatoes_critic: 'Rotten Tomatoes (Critic)', rotten_tomatoes_audience: 'Rotten Tomatoes (Audience)',
+    metacritic_critic: 'Metacritic (Critic)', metacritic_user: 'Metacritic (User)',
+    roger_ebert: 'Roger Ebert', anilist: 'AniList', myanimelist: 'MyAnimeList'
 };
 
 // --- State Management ---
@@ -83,12 +98,10 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
-        
-        // Deep merge to ensure new keys exist
+        // Merge to handle new properties if any
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -130,7 +143,7 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; /* Auto-Right Anchor */
+            justify-content: flex-end; /* Auto-Right */
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -150,6 +163,7 @@ function updateGlobalStyles() {
         #customEndsAt:hover { opacity: 1.0; text-decoration: underline; }
     `;
 
+    // CSS-based ordering and visibility for instant updates
     Object.keys(CFG.priorities).forEach(key => {
         const isEnabled = CFG.sources[key];
         const order = CFG.priorities[key] || 999;
@@ -170,15 +184,15 @@ function getRatingColor(bands, choice, r) {
     if (r <= bands.redMax) band = 'red';
     else if (r <= bands.orangeMax) band = 'orange';
     else if (r <= bands.ygMax) band = 'yg';
-    
     const idx = Math.max(0, Math.min(3, choice[band] || 0));
     return SWATCHES[band][idx];
 }
 
-// Refresh DOM Elements (Live Preview)
+// Live Preview of Colors & Text
 function refreshDomElements() {
-    updateGlobalStyles();
-    
+    // First update CSS vars/rules
+    updateGlobalStyles(); 
+
     document.querySelectorAll('.mdbl-rating-item').forEach(el => {
         const score = parseFloat(el.dataset.score);
         if (isNaN(score)) return;
@@ -204,7 +218,7 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-// Menu Trigger
+// Global Click Listener for Settings
 document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt') {
         e.preventDefault(); e.stopPropagation();
@@ -302,7 +316,6 @@ function renderRatings(container, data, imdbId) {
             else if (s.includes('myanimelist')) add('myanimelist', v, '#', c, 'MAL');
         });
     }
-    
     container.innerHTML = html;
     refreshDomElements();
 }
@@ -369,37 +382,84 @@ function scan() {
 
 setInterval(scan, 500);
 
+
 /* ==========================================================================
-   4. SETTINGS MENU
+   4. SETTINGS MENU (UI)
 ========================================================================== */
 (function initMenu() {
+    // --- UI CSS from v7.2.0 Restored ---
     const css = `
-        #mdbl-panel { position: fixed; right: 16px; bottom: 70px; width: 460px; background: rgba(22,22,26,0.95); border: 1px solid #444; border-radius: 14px; color: #eee; z-index: 100000; backdrop-filter: blur(10px); display: none; max-height: 90vh; overflow-y: auto; font-family: sans-serif; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        #mdbl-panel header { padding: 12px 16px; background: rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #444; font-weight: bold; cursor: move; }
-        #mdbl-panel .sec { padding: 12px 16px; border-bottom: 1px solid #333; }
-        #mdbl-panel .row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; min-height: 32px; }
-        #mdbl-panel input[type="range"] { flex: 1; margin: 0 12px; cursor: pointer; }
-        #mdbl-panel select, #mdbl-panel input[type="number"] { background: #111; color: #fff; border: 1px solid #555; padding: 4px 8px; border-radius: 6px; height: 32px; width: 70px; text-align: center; }
-        #mdbl-panel select { width: 140px; }
-        #mdbl-panel input[type="checkbox"] { transform: scale(1.2); cursor: pointer; }
-        #mdbl-close { background: none; border: none; color: #aaa; font-size: 20px; cursor: pointer; }
-        #mdbl-close:hover { color: #fff; }
-        .mdbl-src-row { background: rgba(255,255,255,0.03); padding: 6px 10px; border-radius: 8px; margin-bottom: 6px; cursor: grab; display: flex; justify-content: space-between; align-items: center; }
-        .mdbl-swatch { width: 18px; height: 18px; display: inline-block; border-radius: 4px; margin-right: 8px; border: 1px solid #555; vertical-align: middle; }
-        
-        /* Uniform Input Sizing */
-        #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
-        #mdbl-panel input.mdbl-num-input { width: 56px; text-align: center; }
-        
-        #mdbl-panel[data-compact="1"] { width: 460px; }
-        #mdbl-panel[data-compact="1"] .sec { padding: 4px 12px; }
-        #mdbl-panel[data-compact="1"] .row { margin-bottom: 4px; min-height: 28px; }
-        #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input { height: 28px; font-size: 12px; }
+    :root { --mdbl-right-col: 48px; --mdbl-right-col-wide: 200px; }
+    #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
+        border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
+        color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
+    #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
+        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); }
+    #mdbl-panel header h3 { margin:0; font-size:15px; font-weight:700; flex:1; }
+    #mdbl-close { border:none; background:transparent; color:#aaa; font-size:18px; cursor:pointer; padding:4px; border-radius:8px; }
+    #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
+    #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+    #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
+    
+    #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:10px; padding:8px 10px; border-radius:12px; }
+    #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); min-height: 48px; box-sizing:border-box; }
+    #mdbl-panel .mdbl-row.wide { grid-template-columns:1fr var(--mdbl-right-col-wide); }
+    #mdbl-panel input[type="checkbox"] { transform:scale(1.1); justify-self:end; cursor: pointer; }
+    #mdbl-panel input[type="text"] { width:100%; padding:10px 0; border:0; background:transparent; color:#eaeaea; font-size:14px; outline:none; }
+    
+    #mdbl-panel select, #mdbl-panel input.mdbl-pos-input, #mdbl-panel input.mdbl-num-input {
+        padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea;
+        height:32px; line-height: 32px; box-sizing:border-box; display:inline-block;
+    }
+    #mdbl-panel .mdbl-select { width:140px; justify-self:end; }
+    
+    #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
+    #mdbl-panel input.mdbl-num-input { width: 56px; text-align: center; }
 
-        @media (max-width: 600px) {
-            #mdbl-panel, #mdbl-panel[data-compact="1"] { width: 96% !important; left: 2% !important; right: 2% !important; bottom: 10px !important; top: auto !important; transform: none !important; max-height: 80vh; }
-            #mdbl-panel header { cursor: default; }
+    #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.08); }
+    #mdbl-panel button { padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
+    #mdbl-panel button.primary { background:#2a6df4; border-color:#2a6df4; color:#fff; }
+    
+    #mdbl-sources { display:flex; flex-direction:column; gap:8px; }
+    .mdbl-source { background:#0f1115; border:1px solid rgba(255,255,255,0.1); cursor: grab; }
+    .mdbl-src-left { display:flex; align-items:center; gap:10px; }
+    .mdbl-src-left img { height:18px; width:auto; }
+    .mdbl-src-left .name { font-size:13px; }
+    #mdbl-key-box { background:#0f1115; border:1px solid rgba(255,255,255,0.1); padding:10px; border-radius:12px; }
+    #mdbl-panel input[type="range"] { flex: 1; margin: 0 12px; cursor: pointer; }
+    
+    .mdbl-grid { display:grid; grid-template-columns:1fr; gap:10px; }
+    .mdbl-grid .grid-row { display:grid; grid-template-columns:1fr 1fr; align-items:center; gap:12px; }
+    .grid-right { display:flex; align-items:center; gap:8px; justify-content:flex-end; }
+    .mdbl-grid label { white-space: nowrap; }
+    .sw { display:inline-block; width:18px; height:18px; border-radius:4px; border:1px solid rgba(255,255,255,0.25); }
+    
+    #mdbl-panel hr { border:0; border-top:1px solid rgba(255,255,255,0.08); margin:10px 0; }
+    #mdbl-panel .mdbl-actions { display:flex; align-items:center; gap:8px; }
+    #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
+    #mdbl-panel .mdbl-actions .mdbl-compact { display:inline-flex; align-items:center; gap:6px; opacity:0.95; }
+    
+    /* Compact Mode */
+    #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; --mdbl-right-col-wide:220px; width:460px; }
+    #mdbl-panel[data-compact="1"] header { padding:6px 12px; }
+    #mdbl-panel[data-compact="1"] .mdbl-section { padding:2px 12px; gap:2px; }
+    #mdbl-panel[data-compact="1"] .mdbl-row, #mdbl-panel[data-compact="1"] .mdbl-source { gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
+    #mdbl-panel[data-compact="1"] .mdbl-actions { padding:6px 10px; }
+    #mdbl-panel[data-compact="1"] .mdbl-src-left img { height:16px; }
+    #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input.mdbl-pos-input, #mdbl-panel[data-compact="1"] input.mdbl-num-input { height: 28px; font-size: 12px; line-height: 28px; }
+    #mdbl-panel[data-compact="1"] .mdbl-select { width: 140px; }
+    #mdbl-panel[data-compact="1"] hr { margin: 4px 0; }
+
+    @media (max-width: 600px) {
+        #mdbl-panel, #mdbl-panel[data-compact="1"] {
+            width: 96% !important; left: 2% !important; right: 2% !important; bottom: 10px !important; top: auto !important;
+            transform: none !important; max-height: 80vh;
+            --mdbl-right-col: 40px; --mdbl-right-col-wide: 140px;
         }
+        #mdbl-panel header { cursor: default; }
+        #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { min-height: 42px; padding: 4px 8px; }
+        #mdbl-panel .mdbl-select { width: 140px; }
+    }
     `;
     const style = document.createElement('style');
     style.textContent = css;
@@ -409,19 +469,16 @@ setInterval(scan, 500);
     panel.id = 'mdbl-panel';
     document.body.appendChild(panel);
 
-    // Public Open Function
     window.MDBL_OPEN_SETTINGS = () => {
-        try {
-            renderMenuContent(panel);
-            panel.style.display = 'block';
-        } catch(e) { console.error('Menu Render Error:', e); }
+        renderMenuContent(panel);
+        panel.style.display = 'block';
     };
 
     // Draggable
     let isDrag = false, sx, sy, lx, ly;
     panel.addEventListener('mousedown', (e) => {
         if (window.innerWidth <= 600 || ['INPUT','SELECT','BUTTON'].includes(e.target.tagName)) return;
-        if (e.target.closest('.sec')) return; 
+        if (e.target.closest('.sec') || e.target.closest('.mdbl-section')) return; 
         isDrag = true; const r = panel.getBoundingClientRect();
         lx = r.left; ly = r.top; sx = e.clientX; sy = e.clientY;
         panel.style.right = 'auto'; panel.style.bottom = 'auto';
@@ -439,65 +496,92 @@ setInterval(scan, 500);
 })();
 
 function renderMenuContent(panel) {
-    const row = (label, input) => `<div class="row"><span>${label}</span>${input}</div>`;
+    const row = (label, input, wide) => `<div class="mdbl-row ${wide?'wide':''}"><span>${label}</span>${input}</div>`;
     
-    // --- HTML Generation ---
     let html = `
-    <header><h3>Ratings Settings</h3><button id="mdbl-close">✕</button></header>
-    
-    <div class="sec" id="mdbl-sec-keys">
-       ${(!INJ_KEYS.MDBLIST && !JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST) ? `<div style="margin-bottom:5px"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" style="width:100%"></div>` : ''}
+    <header>
+      <h3>Ratings Settings</h3>
+      <button id="mdbl-close">✕</button>
+    </header>
+    <div class="mdbl-section" id="mdbl-sec-keys">
+       ${(!getInjectorKey()) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${(JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST)||''}"></div>` : ''}
     </div>
-    
-    <div class="sec">
-       <div style="font-size:0.85em;opacity:0.7;margin-bottom:5px">Sources (drag to reorder)</div>
+    <div class="mdbl-section">
+       <div class="mdbl-subtle">Sources (drag to reorder)</div>
        <div id="mdbl-sources"></div>
     </div>
-    
-    <div class="sec">
-        <div style="font-size:0.85em;opacity:0.7;margin-bottom:5px">Display</div>
+    <div class="mdbl-section" id="mdbl-sec-display">
+        <div class="mdbl-subtle">Display</div>
         ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
         ${row('Color icons', `<input type="checkbox" id="d_cicon" ${CFG.display.colorIcons?'checked':''}>`)}
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         
-        <div class="row"><span>Pos X</span><div style="display:flex;align-items:center;flex:1"><input type="range" id="d_x_rng" min="-1000" max="1000" value="${CFG.display.posX}"><input type="number" id="d_x_num" value="${CFG.display.posX}" class="mdbl-pos-input"></div></div>
-        <div class="row"><span>Pos Y</span><div style="display:flex;align-items:center;flex:1"><input type="range" id="d_y_rng" min="-1000" max="1000" value="${CFG.display.posY}"><input type="number" id="d_y_num" value="${CFG.display.posY}" class="mdbl-pos-input"></div></div>
+        <div class="mdbl-row wide">
+            <span>Position X (px)</span>
+            <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
+            <input type="range" id="d_x_rng" min="-1000" max="1000" value="${CFG.display.posX}">
+            <input type="number" id="d_x_num" value="${CFG.display.posX}" class="mdbl-pos-input">
+            </div>
+        </div>
+        <div class="mdbl-row wide">
+            <span>Position Y (px)</span>
+            <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
+            <input type="range" id="d_y_rng" min="-1000" max="1000" value="${CFG.display.posY}">
+            <input type="number" id="d_y_num" value="${CFG.display.posY}" class="mdbl-pos-input">
+            </div>
+        </div>
 
-        <hr style="border:0;border-top:1px solid #444;margin:8px 0">
-        
-        ${createColorBandRow('th_red', 'Rating', CFG.display.colorBands.redMax, 'red')}
-        ${createColorBandRow('th_orange', 'Rating', CFG.display.colorBands.orangeMax, 'orange')}
-        ${createColorBandRow('th_yg', 'Rating', CFG.display.colorBands.ygMax, 'yg')}
-        <div class="row">
-            <label id="label_top_tier">Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)</label>
-            <div><span class="mdbl-swatch" id="sw_mg" style="background:${SWATCHES.mg[CFG.display.colorChoice.mg]}"></span><select id="col_mg" class="mdbl-select">${PALETTE_NAMES.mg.map((n,i)=>`<option value="${i}" ${CFG.display.colorChoice.mg===i?'selected':''}>${n}</option>`).join('')}</select></div>
+        <hr>
+        <div class="mdbl-subtle">Color bands &amp; palette</div>
+        <div class="mdbl-grid">
+            ${createColorBandRow('th_red', 'Rating', CFG.display.colorBands.redMax, 'red')}
+            ${createColorBandRow('th_orange', 'Rating', CFG.display.colorBands.orangeMax, 'orange')}
+            ${createColorBandRow('th_yg', 'Rating', CFG.display.colorBands.ygMax, 'yg')}
+            <div class="grid-row">
+                <label id="label_top_tier">Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)</label>
+                <div class="grid-right">
+                    <span class="sw" id="sw_mg" style="background:${SWATCHES.mg[CFG.display.colorChoice.mg]}"></span>
+                    <select id="col_mg" class="mdbl-select">${PALETTE_NAMES.mg.map((n,i)=>`<option value="${i}" ${CFG.display.colorChoice.mg===i?'selected':''}>${n}</option>`).join('')}</select>
+                </div>
+            </div>
         </div>
     </div>
-    
-    <div class="sec" style="display:flex;gap:10px">
-      <button id="mdbl-btn-reset" style="flex:1">Reset</button>
-      <button id="mdbl-btn-save" style="flex:2;background:#2a6df4;color:#fff">Save & Apply</button>
-      <div style="display:flex;align-items:center;gap:5px"><span style="font-size:0.9em">Compact</span><input type="checkbox" id="mdbl-compact-toggle" ${CFG.display.compactLevel?'checked':''}></div>
+    <div class="mdbl-actions">
+      <button id="mdbl-btn-reset">Reset</button>
+      <button id="mdbl-btn-save" class="primary">Save & Apply</button>
+      <div class="mdbl-grow"></div>
+      <label class="mdbl-compact" for="mdbl-compact-toggle">
+        <span>Compact</span>
+        <input type="checkbox" id="mdbl-compact-toggle" ${CFG.display.compactLevel?'checked':''}>
+      </label>
     </div>
     `;
     
     panel.innerHTML = html;
-
-    // --- Source List ---
     const sList = panel.querySelector('#mdbl-sources');
+    
+    // Populate Sources
     Object.keys(CFG.priorities).sort((a,b) => CFG.priorities[a]-CFG.priorities[b]).forEach(k => {
          if (!CFG.sources.hasOwnProperty(k)) return;
          const div = document.createElement('div');
-         div.className = 'mdbl-src-row';
+         div.className = 'mdbl-source mdbl-src-row';
          div.draggable = true;
          div.dataset.key = k;
-         div.innerHTML = `<span style="cursor:grab">⋮⋮ ${k.replace(/_/g,' ')}</span><input type="checkbox" class="src-check" ${CFG.sources[k]?'checked':''}>`;
+         div.innerHTML = `
+            <div class="mdbl-src-left">
+                <span class="mdbl-drag-handle">⋮⋮</span>
+                <img src="${LOGO[k]||''}" style="height:18px">
+                <span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span>
+            </div>
+            <input type="checkbox" class="src-check" ${CFG.sources[k]?'checked':''}>
+         `;
          sList.appendChild(div);
     });
 
-    // --- Bindings ---
+    // Event Binding
     panel.querySelector('#mdbl-close').onclick = () => panel.style.display = 'none';
     
+    // --- Live Preview Logic ---
     const updateLiveAll = () => {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
@@ -512,53 +596,42 @@ function renderMenuContent(panel) {
         panel.querySelector('#label_top_tier').textContent = `Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)`;
         ['red','orange','yg','mg'].forEach(k => panel.querySelector(`#sw_${k}`).style.background = SWATCHES[k][CFG.display.colorChoice[k]]);
         
-        refreshDomElements();
+        refreshDomElements(); // Trigger LIVE DOM updates
     };
 
+    // Bind Inputs
     panel.querySelectorAll('input, select').forEach(el => {
         if(el.type === 'range' || el.type === 'text' || el.type === 'number') el.addEventListener('input', updateLiveAll);
         else el.addEventListener('change', updateLiveAll);
     });
-
-    // Pos Live
+    
     const updatePos = (axis, val) => {
         CFG.display[axis] = parseInt(val);
         panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_rng`).value = val;
         panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_num`).value = val;
         updateGlobalStyles();
     };
-    panel.querySelector('#d_x_rng').addEventListener('input', e => updatePos('posX', e.target.value));
-    panel.querySelector('#d_x_num').addEventListener('input', e => updatePos('posX', e.target.value));
-    panel.querySelector('#d_y_rng').addEventListener('input', e => updatePos('posY', e.target.value));
-    panel.querySelector('#d_y_num').addEventListener('input', e => updatePos('posY', e.target.value));
-
-    // Source Vis Live
+    const bind = (id, fn) => { const el=panel.querySelector(id); if(el) el.addEventListener('input', fn); };
+    bind('#d_x_rng', (e) => updatePos('posX', e.target.value));
+    bind('#d_x_num', (e) => updatePos('posX', e.target.value));
+    bind('#d_y_rng', (e) => updatePos('posY', e.target.value));
+    bind('#d_y_num', (e) => updatePos('posY', e.target.value));
+    
+    // Source Checks
     panel.querySelectorAll('.src-check').forEach(cb => {
         cb.addEventListener('change', (e) => {
-            const k = e.target.closest('.mdbl-src-row').dataset.key;
-            CFG.sources[k] = e.target.checked;
-            updateGlobalStyles();
+            CFG.sources[e.target.closest('.mdbl-source').dataset.key] = e.target.checked;
+            updateGlobalStyles(); // Toggle visibility via CSS
         });
     });
 
-    // Compact
+    // Compact Toggle
     panel.querySelector('#mdbl-compact-toggle').addEventListener('change', (e) => {
         panel.setAttribute('data-compact', e.target.checked ? '1':'0');
     });
+    if(CFG.display.compactLevel) panel.setAttribute('data-compact', '1');
 
-    // Save / Reset
-    panel.querySelector('#mdbl-btn-save').onclick = () => {
-        CFG.display.compactLevel = panel.querySelector('#mdbl-compact-toggle').checked ? 1 : 0;
-        saveConfig();
-        const ki = panel.querySelector('#mdbl-key-mdb');
-        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
-        location.reload();
-    };
-    panel.querySelector('#mdbl-btn-reset').onclick = () => {
-        if(confirm('Reset?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }
-    };
-
-    // Drag Drop
+    // Drag Drop (Live Sort)
     let dragSrc = null;
     panel.querySelectorAll('.mdbl-src-row').forEach(row => {
         row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; row.style.opacity = '0.5'; });
@@ -574,18 +647,45 @@ function renderMenuContent(panel) {
                 if (srcI < tgtI) list.insertBefore(dragSrc, row.nextSibling);
                 else list.insertBefore(dragSrc, row);
                 
-                // Update Priority Live
+                // Update priorities
                 [...list.querySelectorAll('.mdbl-src-row')].forEach((r, i) => CFG.priorities[r.dataset.key] = i+1);
-                updateGlobalStyles();
+                updateGlobalStyles(); // Re-render CSS order
             }
         });
     });
+
+    // Save
+    panel.querySelector('#mdbl-btn-save').onclick = () => {
+        CFG.display.compactLevel = panel.querySelector('#mdbl-compact-toggle').checked ? 1 : 0;
+        saveConfig();
+        const keyInput = panel.querySelector('#mdbl-key-mdb');
+        if(keyInput && keyInput.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: keyInput.value.trim()}));
+        location.reload();
+    };
+    
+    // Reset
+    panel.querySelector('#mdbl-btn-reset').onclick = () => {
+        if(confirm('Reset all settings?')) {
+            localStorage.removeItem('mdbl_prefs');
+            location.reload();
+        }
+    };
+    
+    // Key Logic
+    const getInjectorKey = () => { try { return (window.MDBL_KEYS && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; } catch { return ''; } };
+    if (getInjectorKey()) {
+       const kw = panel.querySelector('#mdbl-sec-keys');
+       if(kw) { kw.innerHTML = ''; kw.style.display = 'none'; }
+    }
 }
 
 function createColorBandRow(id, lbl, val, key) {
     const opts = PALETTE_NAMES[key].map((n,i) => `<option value="${i}" ${CFG.display.colorChoice[key]===i?'selected':''}>${n}</option>`).join('');
-    return `<div class="row">
+    return `<div class="grid-row">
         <label>${lbl} ≤ <input type="number" id="${id}" value="${val}" class="mdbl-num-input"> %</label>
-        <div><span class="mdbl-swatch" id="sw_${key}" style="background:${SWATCHES[key][CFG.display.colorChoice[key]]}"></span><select id="col_${key}" class="mdbl-select">${opts}</select></div>
+        <div class="grid-right">
+            <span class="sw" id="sw_${key}" style="background:${SWATCHES[key][CFG.display.colorChoice[key]]}"></span>
+            <select id="col_${key}" class="mdbl-select">${opts}</select>
+        </div>
     </div>`;
 }
