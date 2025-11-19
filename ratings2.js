@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v8.2.0 — Stable Base & Forced Links)
+// @name         Jellyfin Ratings (v8.3.0 — Trakt/Meta Fix)
 // @namespace    https://mdblist.com
-// @version      8.2.0
-// @description  Restored v7.8.0 base (proven visibility). Forced external link generation to prevent 404s. Theme Sync & Live Preview active.
+// @version      8.3.0
+// @description  Restores v6.4.1 link logic for Trakt & Metacritic. Stable Base. Forced Links. Theme Sync & Live Preview.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v8.2.0 loading...');
+console.log('[Jellyfin Ratings] v8.3.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -211,6 +211,17 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
+// Link Fixer
+function fixUrl(url, domain) {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    const clean = url.startsWith('/') ? url.substring(1) : url;
+    return `https://${domain}/${clean}`;
+}
+
+// New Helper: Slug Generator (from old script)
+const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
 document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt') {
         e.preventDefault(); e.stopPropagation();
@@ -272,25 +283,15 @@ function createRatingHtml(key, val, link, count, title) {
     const n = parseFloat(val) * (SCALE[key] || 1);
     const r = Math.round(n);
     
-    // Prevent empty links (which default to current page)
-    const hasLink = link && link !== '#' && link.startsWith('http');
-    const tag = hasLink ? 'a' : 'div';
-    const hrefAttr = hasLink ? `href="${link}" target="_blank"` : '';
+    // Fallback for link
+    const safeLink = (link && link !== '#' && !link.startsWith('http://192')) ? link : '#';
     
     return `
-        <${tag} ${hrefAttr} class="mdbl-rating-item" data-source="${key}" data-score="${r}">
+        <a href="${safeLink}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}">
             <img src="${LOGO[key]}" alt="${title}" title="${title} ${count ? '('+count+')' : ''}">
             <span title="${title}">${CFG.display.showPercentSymbol ? r+'%' : r}</span>
-        </${tag}>
+        </a>
     `;
-}
-
-// HELPER: Force valid absolute URL
-function fixUrl(url, domain) {
-    if (!url) return null;
-    if (url.startsWith('http')) return url;
-    const clean = url.startsWith('/') ? url.substring(1) : url;
-    return `https://${domain}/${clean}`;
 }
 
 function renderRatings(container, data, pageImdbId, type) {
@@ -317,21 +318,22 @@ function renderRatings(container, data, pageImdbId, type) {
 
             // --- FORCED LINKS LOGIC ---
             if (s.includes('imdb')) {
-                // Always force our constructed link if we have an ID, it's safer
+                // Force IMDb link via ID if available
                 const lnk = ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : (apiLink && apiLink.startsWith('http') ? apiLink : null);
                 add('imdb', v, lnk, c, 'IMDb');
             } 
             else if (s.includes('tmdb')) {
-                const lnk = `https://www.themoviedb.org/${type}/${ids.tmdb}`;
+                const lnk = ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
                 add('tmdb', v, lnk, c, 'TMDb');
             }
             else if (s.includes('trakt')) {
-                const lnk = ids.trakt ? `https://trakt.tv/${traktType}/${ids.trakt}` : null;
+                // RESTORED: Use search query via IMDb if Trakt ID missing (Old Script Logic)
+                const lnk = ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#';
                 add('trakt', v, lnk, c, 'Trakt');
             }
             else if (s.includes('letterboxd')) {
-                // LB links from API are often relative. Force absolute via ID if possible.
-                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
+                // RESTORED: Use IMDb ID for Letterboxd
+                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
                 add('letterboxd', v, lnk, c, 'Letterboxd');
             }
             else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
@@ -341,13 +343,14 @@ function renderRatings(container, data, pageImdbId, type) {
                 add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience');
             }
             else if (s.includes('metacritic') && !s.includes('user')) {
-                let lnk = fixUrl(apiLink, 'metacritic.com');
-                if (!lnk && ids.slug) lnk = `https://www.metacritic.com/${metaType}/${ids.slug}`;
+                // RESTORED: Generate slug locally or search
+                const slug = localSlug(data.title);
+                const lnk = slug ? `https://www.metacritic.com/${metaType}/${slug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
                 add('metacritic_critic', v, lnk, c, 'Metacritic');
             }
             else if (s.includes('metacritic') && s.includes('user')) {
-                let lnk = fixUrl(apiLink, 'metacritic.com');
-                if (!lnk && ids.slug) lnk = `https://www.metacritic.com/${metaType}/${ids.slug}/user-reviews`;
+                const slug = localSlug(data.title);
+                const lnk = slug ? `https://www.metacritic.com/${metaType}/${slug}/user-reviews` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
                 add('metacritic_user', v, lnk, c, 'User');
             }
             else if (s.includes('roger')) {
@@ -397,6 +400,9 @@ function scan() {
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
     if (imdbLink) {
         const m = imdbLink.href.match(/tt\d+/);
+        // Save global IMDB ID when found
+        if (m) currentImdbId = m[0];
+        
         if (m && m[0] !== currentImdbId) {
             currentImdbId = m[0];
             document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
