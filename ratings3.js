@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v7.8.0 — Links & Color Sync Fix)
+// @name         Jellyfin Ratings (v7.9.0 — Link Repair)
 // @namespace    https://mdblist.com
-// @version      7.8.0
-// @description  Unified ratings. Fixes broken links (Trakt, LB, etc.). Syncs color from Play button. Fixes menu closing.
+// @version      7.9.0
+// @description  Unified ratings. Fixed broken links for all providers (IMDb, Trakt, LB, etc.). Theme Sync. Live Preview.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v7.8.0 loading...');
+console.log('[Jellyfin Ratings] v7.9.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -149,13 +149,14 @@ function updateGlobalStyles() {
             text-decoration: none;
             transition: transform 0.2s ease;
             cursor: pointer;
+            color: inherit;
         }
         .mdbl-rating-item:hover {
-            transform: scale(1.1) rotate(2deg);
+            transform: scale(1.15) rotate(3deg);
             z-index: 1000;
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
-        .mdbl-rating-item span { font-size: 1em; vertical-align: middle; cursor: pointer; transition: color 0.2s; }
+        .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
         #customEndsAt { 
             font-size: inherit; opacity: 0.7; cursor: pointer; 
@@ -280,36 +281,71 @@ function createRatingHtml(key, val, link, count, title) {
     `;
 }
 
-function renderRatings(container, data, imdbId) {
+function renderRatings(container, data, imdbId, type) {
     let html = '';
     const add = (k, v, lnk, cnt, tit) => html += createRatingHtml(k, v, lnk, cnt, tit);
     
-    // Extract IDs for fallback links
+    // ROBUST ID EXTRACTION
     const ids = {
-        imdb: data.imdbid || imdbId,
-        tmdb: data.id || container.dataset.tmdbId,
-        trakt: data.traktid
+        imdb: data.imdbid || data.imdb_id || imdbId,
+        tmdb: data.id || data.tmdbid || data.tmdb_id || container.dataset.tmdbId,
+        trakt: data.traktid || data.trakt_id,
+        slug: data.slug || data.ids?.slug
     };
+
+    // Helper for Type-based links (movies vs shows)
+    const traktType = type === 'show' ? 'shows' : 'movies';
+    const metaType = type === 'show' ? 'tv' : 'movie';
 
     if (data.ratings) {
         data.ratings.forEach(r => {
             const s = (r.source || '').toLowerCase();
             const v = r.value;
             const c = r.votes || r.count;
-            // Prefer direct URL from API, else fallback
-            const url = r.url;
+            
+            // --- LINK GENERATION LOGIC ---
+            let link = r.url; // Prioritize direct API url
 
-            if (s.includes('imdb')) add('imdb', v, url || `https://www.imdb.com/title/${ids.imdb}/`, c, 'IMDb');
-            else if (s.includes('tmdb')) add('tmdb', v, url || `https://www.themoviedb.org/${container.dataset.type}/${ids.tmdb}`, c, 'TMDb');
-            else if (s.includes('trakt')) add('trakt', v, url || (ids.trakt ? `https://trakt.tv/movies/${ids.trakt}` : '#'), c, 'Trakt');
-            else if (s.includes('letterboxd')) add('letterboxd', v, url || `https://letterboxd.com/imdb/${ids.imdb}/`, c, 'Letterboxd');
-            else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) add('rotten_tomatoes_critic', v, url || '#', c, 'RT Critic');
-            else if (s.includes('popcorn') || s.includes('audience')) add('rotten_tomatoes_audience', v, url || '#', c, 'RT Audience');
-            else if (s.includes('metacritic') && !s.includes('user')) add('metacritic_critic', v, url || '#', c, 'Metacritic');
-            else if (s.includes('metacritic') && s.includes('user')) add('metacritic_user', v, url || '#', c, 'User');
-            else if (s.includes('roger')) add('roger_ebert', v, url || '#', c, 'Roger Ebert');
-            else if (s.includes('anilist')) add('anilist', v, url || '#', c, 'AniList');
-            else if (s.includes('myanimelist')) add('myanimelist', v, url || '#', c, 'MAL');
+            if (s.includes('imdb')) {
+                if(!link && ids.imdb) link = `https://www.imdb.com/title/${ids.imdb}/`;
+                add('imdb', v, link, c, 'IMDb');
+            } 
+            else if (s.includes('tmdb')) {
+                if(!link && ids.tmdb) link = `https://www.themoviedb.org/${type}/${ids.tmdb}`;
+                add('tmdb', v, link, c, 'TMDb');
+            }
+            else if (s.includes('trakt')) {
+                if(!link && ids.trakt) link = `https://trakt.tv/${traktType}/${ids.trakt}`;
+                add('trakt', v, link, c, 'Trakt');
+            }
+            else if (s.includes('letterboxd')) {
+                // LB links usually use slug or imdb_id
+                if(!link && ids.imdb) link = `https://letterboxd.com/imdb/${ids.imdb}/`;
+                add('letterboxd', v, link, c, 'Letterboxd');
+            }
+            else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
+                add('rotten_tomatoes_critic', v, link || '#', c, 'RT Critic');
+            }
+            else if (s.includes('popcorn') || s.includes('audience')) {
+                add('rotten_tomatoes_audience', v, link || '#', c, 'RT Audience');
+            }
+            else if (s.includes('metacritic') && !s.includes('user')) {
+                if(!link && ids.slug) link = `https://www.metacritic.com/${metaType}/${ids.slug}`;
+                add('metacritic_critic', v, link, c, 'Metacritic');
+            }
+            else if (s.includes('metacritic') && s.includes('user')) {
+                if(!link && ids.slug) link = `https://www.metacritic.com/${metaType}/${ids.slug}/user-reviews`;
+                add('metacritic_user', v, link, c, 'User');
+            }
+            else if (s.includes('roger')) {
+                add('roger_ebert', v, link || '#', c, 'Roger Ebert');
+            }
+            else if (s.includes('anilist')) {
+                add('anilist', v, link || '#', c, 'AniList');
+            }
+            else if (s.includes('myanimelist')) {
+                add('myanimelist', v, link || '#', c, 'MAL');
+            }
         });
     }
     container.innerHTML = html;
@@ -323,7 +359,7 @@ function fetchRatings(container, tmdbId, type) {
         if (cached) {
             const c = JSON.parse(cached);
             if (Date.now() - c.ts < CACHE_DURATION_API) {
-                renderRatings(container, c.data, currentImdbId);
+                renderRatings(container, c.data, currentImdbId, type);
                 return;
             }
         }
@@ -336,7 +372,7 @@ function fetchRatings(container, tmdbId, type) {
             try {
                 const d = JSON.parse(r.responseText);
                 localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
-                renderRatings(container, d, currentImdbId);
+                renderRatings(container, d, currentImdbId, type);
             } catch(e) {}
         }
     });
@@ -378,13 +414,13 @@ function scan() {
 setInterval(scan, 500);
 
 /* ==========================================================================
-   4. SETTINGS MENU
+   4. SETTINGS MENU (INIT)
 ========================================================================== */
 let dragSrc = null;
-let themeColor = '#2a6df4'; // Default fallback
+let themeColor = '#2a6df4';
 
+// --- Helper to get current theme color from Play button or similar ---
 function getJellyfinColor() {
-    // Try to grab color from a primary button on screen
     const btn = document.querySelector('.button-submit, .btnPlay, .main-button, .emby-button-foreground');
     if(btn) {
         const col = window.getComputedStyle(btn).backgroundColor;
@@ -413,12 +449,14 @@ function initMenu() {
     #mdbl-panel .mdbl-row.wide { grid-template-columns:1fr var(--mdbl-right-col-wide); }
     
     /* Theme Sync */
-    #mdbl-panel input[type="checkbox"] { transform:scale(1.1); justify-self:end; cursor: pointer; accent-color: var(--mdbl-theme); }
+    #mdbl-panel input[type="checkbox"] { 
+        transform: scale(1.2); cursor: pointer; 
+        accent-color: var(--mdbl-theme); 
+    }
     #mdbl-panel input[type="range"] { flex: 1; margin: 0 12px; cursor: pointer; accent-color: var(--mdbl-theme); }
     
     #mdbl-panel input[type="text"] { width:100%; padding:10px 0; border:0; background:transparent; color:#eaeaea; font-size:14px; outline:none; }
     
-    /* Inputs & Selects (Dark Spinners) */
     #mdbl-panel select, #mdbl-panel input.mdbl-pos-input, #mdbl-panel input.mdbl-num-input {
         padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea;
         height:32px; line-height: 32px; box-sizing:border-box; display:inline-block; color-scheme: dark;
@@ -430,7 +468,11 @@ function initMenu() {
     #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.08); }
     #mdbl-panel button { padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
     
-    #mdbl-panel button.primary { background: var(--mdbl-theme) !important; border-color: var(--mdbl-theme) !important; color: #fff; }
+    #mdbl-panel button.primary { 
+        background: var(--mdbl-theme) !important; 
+        border-color: var(--mdbl-theme) !important; 
+        color: #fff; 
+    }
     
     #mdbl-sources { display:flex; flex-direction:column; gap:8px; }
     .mdbl-source { background:#0f1115; border:1px solid rgba(255,255,255,0.1); cursor: grab; }
@@ -505,8 +547,8 @@ function initMenu() {
     });
     document.addEventListener('mouseup', () => isDrag = false);
     
-    // Close on click outside
-    document.addEventListener('click', (e) => {
+    // Fix: Close on click outside
+    document.addEventListener('mousedown', (e) => {
         if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt') {
             panel.style.display = 'none';
         }
@@ -648,7 +690,6 @@ function renderMenuContent(panel) {
     let dragSrc = null;
     panel.querySelectorAll('.mdbl-src-row').forEach(row => {
         row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; });
-        // Live Sort
         row.addEventListener('dragover', e => { 
             e.preventDefault(); 
             if (dragSrc && dragSrc !== row) {
@@ -675,6 +716,12 @@ function renderMenuContent(panel) {
     panel.querySelector('#mdbl-btn-reset').onclick = () => {
         if(confirm('Reset all settings?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }
     };
+    
+    const getInjectorKey = () => { try { return (window.MDBL_KEYS && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; } catch { return ''; } };
+    if (getInjectorKey()) {
+       const kw = panel.querySelector('#mdbl-sec-keys');
+       if(kw) { kw.innerHTML = ''; kw.style.display = 'none'; }
+    }
 }
 
 function createColorBandRow(id, lbl, val, key) {
