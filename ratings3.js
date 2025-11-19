@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.7.1 — Restored v9.7.0 Base)
+// @name         Jellyfin Ratings (v9.7.0 — Observer & Compact UI)
 // @namespace    https://mdblist.com
-// @version      9.7.1
-// @description  Restored the stable v9.7.0 code. MutationObserver for navigation. Compact Header. Theme Sync.
+// @version      9.7.0
+// @description  Unified ratings. Uses MutationObserver for instant nav detection (fixes loading issues). Super-compact Header.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v9.7.1 (Restored Base) loading...');
+console.log('[Jellyfin Ratings] v9.7.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -162,6 +162,7 @@ function updateGlobalStyles() {
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
         
+        /* Ends At & Settings Icon */
         #customEndsAt { 
             font-size: inherit; opacity: 0.7; cursor: pointer; 
             margin-left: 10px; display: inline; vertical-align: baseline;
@@ -236,7 +237,7 @@ document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt' || e.target.closest('#mdbl-settings-trigger')) {
         e.preventDefault(); e.stopPropagation();
         if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
-        else initMenu();
+        else initMenu(); // Try init if missing
     }
 }, true);
 
@@ -424,12 +425,13 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// --- SCANNER (OBSERVER) ---
+// --- IMPROVED SCANNER (OBSERVER + STATELESS CHECK) ---
 function scanDOM() {
-    // Navigation Guard
+    // Navigation Guard: Reset if URL changed
     if (window.location.pathname !== lastPath) {
         lastPath = window.location.pathname;
         currentImdbId = null; 
+        // Clear old containers to force re-check
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     }
 
@@ -438,13 +440,15 @@ function scanDOM() {
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
     if (imdbLink) {
         const m = imdbLink.href.match(/tt\d+/);
-        if (m && m[0] !== currentImdbId) {
-            currentImdbId = m[0];
-            document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
+        if (m) {
+            if (m[0] !== currentImdbId) {
+                currentImdbId = m[0];
+                document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
+            }
         }
     }
 
-    // STATELESS CHECK
+    // STATELESS CHECK: Ensure every visible movie link has a rating container with the CORRECT ID
     [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
@@ -453,10 +457,13 @@ function scanDOM() {
             
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper) {
+                // Check for existing container
                 const existing = wrapper.querySelector('.mdblist-rating-container');
+                
+                // If no container, OR container has wrong ID (recycled page), replace it
                 if (!existing || existing.dataset.tmdbId !== id) {
-                    if(existing) existing.remove();
-
+                    if(existing) existing.remove(); // Kill stale container
+                    
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
@@ -469,10 +476,14 @@ function scanDOM() {
     });
 }
 
-// Watch for DOM changes (Nav)
-const observer = new MutationObserver(scanDOM);
+// Observer triggers scan on DOM changes (better than timer for SPAs)
+const observer = new MutationObserver(() => {
+    scanDOM();
+});
 observer.observe(document.body, { childList: true, subtree: true });
-setInterval(scanDOM, 1000); // Fallback
+
+// Fallback timer just in case
+setInterval(scanDOM, 1000);
 
 
 /* ==========================================================================
@@ -503,16 +514,17 @@ function initMenu() {
     
     /* Compact Header */
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:4px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
-        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; height: 30px; }
-    #mdbl-panel header h3 { margin:0; font-size:14px; font-weight:700; } 
+        display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; height: 40px; }
+    #mdbl-panel header h3 { margin:0; font-size:14px; font-weight:700; } /* Smaller Font */
     
     #mdbl-close { 
-        width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; 
-        background: transparent; border: none; color: #aaa; font-size: 18px; cursor: pointer; 
+        width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; 
+        background: transparent; border: none; color: #aaa; font-size: 16px; cursor: pointer; 
         padding: 0; border-radius: 6px; 
     }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
     
+    /* Sections & Spacing */
     #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     
@@ -721,7 +733,7 @@ function renderMenuContent(panel) {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
-        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; // Live Update 24h
+        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked;
         
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
         CFG.display.colorBands.orangeMax = parseInt(panel.querySelector('#th_orange').value)||69;
