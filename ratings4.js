@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.5.2 — Compact & Layout Fix)
+// @name         Jellyfin Ratings (v6.5.3 — Spacing & Compact Fix)
 // @namespace    https://mdblist.com
-// @version      6.5.2
-// @description  Unified ratings. Fixes overlap issues. optimized Compact Mode. Wider inputs.
+// @version      6.5.3
+// @description  Unified ratings. Increased Ends-At spacing. Compact Mode wider & shorter (no scroll).
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v6.5.2 loading...');
+console.log('[Jellyfin Ratings] v6.5.3 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -188,7 +188,6 @@ function getRatingColor(bands, choice, r) {
         const primary = findPrimaryRow(); if (!primary) return;
         const { node: runtimeNode, minutes } = findRuntimeNode(primary);
         
-        // Remove existing if runtime gone (rare)
         if (!minutes && primary.querySelector('#customEndsAt')) {
             primary.querySelector('#customEndsAt').remove();
             return;
@@ -203,14 +202,13 @@ function getRatingColor(bands, choice, r) {
         if (!span) {
             span = document.createElement('span');
             span.id = 'customEndsAt';
-            // FORCE inline-flex behavior to stay in flow
+            // Added more margin-left (24px) to fix the tightness issue
             Object.assign(span.style, {
-                marginLeft: '12px', 
-                display: 'inline', // Inline keeps it on the same line text-wise
+                marginLeft: '24px', 
+                display: 'inline', 
                 verticalAlign: 'baseline'
             });
             
-            // FIX: Insert immediately after the runtime node to prevent wrapping issues
             if (runtimeNode && runtimeNode.nextSibling) {
                 runtimeNode.parentNode.insertBefore(span, runtimeNode.nextSibling);
             } else {
@@ -537,7 +535,7 @@ function getRatingColor(bands, choice, r) {
     }
     const saved = loadPrefs(); if (saved && Object.keys(saved).length) applyPrefs(saved);
 
-    // --- CSS ---
+    // --- Consolidated CSS (Everything in one place) ---
     const css = `
     :root { --mdbl-right-col: 48px; --mdbl-right-col-wide: 200px; }
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
@@ -594,15 +592,17 @@ function getRatingColor(bands, choice, r) {
     #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
     #mdbl-panel .mdbl-actions .mdbl-compact { display:inline-flex; align-items:center; gap:6px; opacity:0.95; }
     
-    /* FIXED: Compact Mode Width reduced from 480 to 360 to fit better */
-    #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; --mdbl-right-col-wide:160px; width:360px; }
+    /* FIXED: Compact Mode Width increased to 460 to fit slider + text */
+    #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; --mdbl-right-col-wide:220px; width:460px; }
     #mdbl-panel[data-compact="1"] header { padding:6px 12px; }
-    #mdbl-panel[data-compact="1"] .mdbl-section { padding:4px 12px; gap:4px; }
-    #mdbl-panel[data-compact="1"] .mdbl-row, #mdbl-panel[data-compact="1"] .mdbl-source { gap:5px; padding:3px 6px; border-radius:6px; min-height: 36px; }
+    /* Tighter vertical spacing to prevent scroll */
+    #mdbl-panel[data-compact="1"] .mdbl-section { padding:2px 12px; gap:2px; }
+    #mdbl-panel[data-compact="1"] .mdbl-row, #mdbl-panel[data-compact="1"] .mdbl-source { gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
     #mdbl-panel[data-compact="1"] .mdbl-actions { padding:6px 10px; }
     #mdbl-panel[data-compact="1"] .mdbl-src-left img { height:16px; }
-    #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input.mdbl-pos-input { height: 30px; font-size: 12px; }
+    #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input.mdbl-pos-input { height: 28px; font-size: 12px; }
     #mdbl-panel[data-compact="1"] .mdbl-select { width: 140px; }
+    #mdbl-panel[data-compact="1"] hr { margin: 4px 0; }
     `;
 
     if (!document.getElementById('mdbl-settings-css')) {
