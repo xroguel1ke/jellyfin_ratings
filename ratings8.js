@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.4.8 — Overlap Fix)
+// @name         Jellyfin Ratings (v6.4.9 — Ends-At Restored)
 // @namespace    https://mdblist.com
-// @version      6.4.8
-// @description  Unified ratings for Jellyfin. 1500px range. Hides native 'Ends at' text to prevent overlapping.
+// @version      6.4.9
+// @description  Unified ratings. Ends-At restored (script-generated) to avoid overlap. Range +/- 1500px.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v6.4.8 loading...');
+console.log('[Jellyfin Ratings] v6.4.9 loading...');
 
 /* ==========================================================================
    EMERGENCY FIX: Sanitize Storage
@@ -36,6 +36,7 @@ const DEFAULT_DISPLAY = {
   colorIcons:false,
   posX: 0,
   posY: 0,
+  // 24h Format ist hardcoded
   colorBands:{ redMax:50, orangeMax:69, ygMax:79 },
   colorChoice:{ red:0, orange:2, yg:3, mg:0 },
   compactLevel:0
@@ -132,7 +133,7 @@ const Util = {
   if (document.getElementById('mdblist-styles')) return;
   const style=document.createElement('style');
   style.id='mdblist-styles';
-  // Fix overflow issues on common Jellyfin containers to prevent clipping
+  // Fix overflow issues + pointer events
   style.textContent=`
     .mdblist-rating-container{ pointer-events: auto; }
     .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
@@ -150,18 +151,65 @@ let currentImdbId=null;
 
 /* --- FIX: Remove Native Overlapping Text --- */
 function hideNativeEndsAt(){
-  // Sucht nach Elementen, die "Ends at" oder "Endet um" enthalten, und versteckt sie.
-  // Dies verhindert den Grafikfehler.
+  // Hide native "Ends at" to prevent overlap/clutter
   const candidates = document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div');
   candidates.forEach(el => {
-    // Ignoriere unseren eigenen Container
-    if(el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
+    // Do not hide our own elements
+    if(el.id === 'customEndsAt' || el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
     
     const text = (el.textContent || '').toLowerCase();
-    if (text.includes('ends at') || text.includes('endet um')) {
+    if (text.includes('ends at') || text.includes('endet um') || text.includes('endet am')) {
        el.style.display = 'none';
     }
   });
+}
+
+const findPrimaryRow=()=>document.querySelector('.itemMiscInfo.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo-primary')||document.querySelector('.itemMiscInfo');
+
+function parseRuntimeToMinutes(text){
+  if(!text) return 0;
+  const m=text.match(/(?:(\d+)\s*h(?:ours?)?\s*)?(?:(\d+)\s*m(?:in(?:utes?)?)?)?/i);
+  if(!m) return 0; const h=parseInt(m[1]||'0',10), min=parseInt(m[2]||'0',10);
+  if(h===0&&min===0){ const only=text.match(/(\d+)\s*m(?:in(?:utes?)?)?/i); return only?parseInt(only[1],10):0; }
+  return h*60+min;
+}
+
+function findRuntimeNode(primary){
+  for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')){
+    const mins=parseRuntimeToMinutes((el.textContent||'').trim()); if (mins>0) return {node:el, minutes:mins};
+  }
+  const mins=parseRuntimeToMinutes((primary.textContent||'').trim());
+  return mins>0?{node:primary, minutes:mins}:{node:null, minutes:0};
+}
+
+/* --- RESTORED: Script-generated Ends At --- */
+function ensureEndsAtInline(){
+  const primary=findPrimaryRow(); if(!primary) return;
+  const {node,minutes}=findRuntimeNode(primary); if(!minutes) return;
+  
+  const end=new Date(Date.now()+minutes*60000);
+  // Hardcoded 24h format
+  const timeStr=`${Util.pad(end.getHours())}:${Util.pad(end.getMinutes())}`;
+  const content=`Ends at ${timeStr}`; // You can change "Ends at" to "Endet um" here if you prefer German hardcoded
+  
+  let span=primary.querySelector('#customEndsAt');
+  if(!span){
+    span=document.createElement('span'); span.id='customEndsAt';
+    // Styling to match Jellyfin look
+    Object.assign(span.style,{
+        marginLeft:'10px',
+        color:'inherit',
+        opacity:'0.8',
+        fontSize:'inherit',
+        fontWeight:'inherit',
+        whiteSpace:'nowrap',
+        display:'inline-block'
+    });
+    // Append to the END of the primary row (after rating)
+    primary.appendChild(span);
+  }
+  // Update time if needed
+  if(span.textContent !== content) span.textContent = content;
 }
 
 function hideDefaultRatingsOnce(){
@@ -188,7 +236,6 @@ function scanLinks(){
       let px = parseFloat(DISPLAY.posX); if(isNaN(px)) px=0;
       let py = parseFloat(DISPLAY.posY); if(isNaN(py)) py=0;
 
-      // High Z-index to prevent hiding behind other elements
       div.style.cssText += `display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;width:calc(100% + 6px);margin-left:-6px;margin-top:${SPACING.ratingsTopGapPx}px;padding-right:0;box-sizing:border-box;transform:translate(${px}px,${py}px);z-index:99999;position:relative;pointer-events:auto;`;
 
       Object.assign(div.dataset,{type, tmdbId, mdblFetched:'0'}); ref.insertAdjacentElement('afterend',div);
@@ -411,7 +458,8 @@ function fetchRT_HTMLFallback(imdbId, container){
 
 function updateAll(){
   try{
-    hideNativeEndsAt(); // Prevents overlapping default text
+    hideNativeEndsAt(); // hides the glitchy one
+    ensureEndsAtInline(); // creates the clean one
     hideDefaultRatingsOnce();
     scanLinks();
     updateRatings();
@@ -685,7 +733,6 @@ updateAll();
     enableDnD(sList);
 
     const dWrap=panel.querySelector('#mdbl-sec-display');
-    // --- Updated UI: Range increased to 1500 ---
     dWrap.innerHTML=`
       <div class="mdbl-subtle">Display</div>
       <div class="mdbl-row"><span>Color numbers</span><input type="checkbox" id="d_colorNumbers" ${DISPLAY.colorNumbers?'checked':''}></div>
