@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v6.8.0 — Clean Menu & Uniform Compact)
+// @name         Jellyfin Ratings (v6.11.0 — Auto-Right Anchor)
 // @namespace    https://mdblist.com
-// @version      6.8.0
-// @description  Unified ratings. API Key box hidden if valid. Uniform box sizes in Compact Mode.
+// @version      6.11.0
+// @description  Unified ratings. Auto-anchored to right for responsive movement. No Alignment menu. Fixes disappearing.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v6.8.0 loading...');
+console.log('[Jellyfin Ratings] v6.11.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -42,7 +42,7 @@ const DEFAULT_DISPLAY = {
     colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
     compactLevel: 0
 };
-const DEFAULT_SPACING = { ratingsTopGapPx: 8 };
+const DEFAULT_SPACING = { ratingsTopGapPx: 4 };
 const DEFAULT_PRIORITIES = {
     imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
     rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
@@ -54,6 +54,7 @@ const SCALE_MULTIPLIER = {
     metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
     rotten_tomatoes_critic: 1, rotten_tomatoes_audience: 1
 };
+
 const COLOR_SWATCHES = {
     red:    ['#e53935', '#f44336', '#d32f2f', '#c62828'],
     orange: ['#fb8c00', '#f39c12', '#ffa726', '#ef6c00'],
@@ -61,7 +62,6 @@ const COLOR_SWATCHES = {
     mg:     ['#43a047', '#66bb6a', '#388e3c', '#81c784']
 };
 
-// Removed Hex Codes from names
 const PALETTE_NAMES = {
     red:    ['Alert Red', 'Tomato', 'Crimson', 'Deep Red'],
     orange: ['Amber', 'Signal Orange', 'Apricot', 'Burnt Orange'],
@@ -142,6 +142,7 @@ function getRatingColor(bands, choice, r) {
     style.id = 'mdblist-styles';
     style.textContent = `
     .mdblist-rating-container { pointer-events: auto; }
+    /* IMPORTANT: Force visibility even if Jellyfin tries to hide parent row */
     .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
     #customEndsAt { font-size: inherit; opacity: 0.7; cursor: pointer; }
     #customEndsAt:hover { opacity: 1.0; text-decoration: underline; }
@@ -156,6 +157,7 @@ function getRatingColor(bands, choice, r) {
     'use strict';
     let currentImdbId = null;
 
+    const findMainWrapper = () => document.querySelector('.itemMiscInfo');
     const findPrimaryRow = () => document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
 
     function parseRuntimeToMinutes(text) {
@@ -209,7 +211,6 @@ function getRatingColor(bands, choice, r) {
         if (!span) {
             span = document.createElement('span');
             span.id = 'customEndsAt';
-            // Click to open settings
             span.title = 'Click to open Jellyfin Ratings Settings';
             span.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -219,7 +220,7 @@ function getRatingColor(bands, choice, r) {
 
             Object.assign(span.style, {
                 marginLeft: '10px',
-                marginRight: '24px',
+                marginRight: '24px', // Spacing to the right
                 display: 'inline', 
                 verticalAlign: 'baseline'
             });
@@ -240,6 +241,7 @@ function getRatingColor(bands, choice, r) {
     }
 
     function scanLinks() {
+        // Detect page changes
         document.querySelectorAll('a.emby-button[href*="imdb.com/title/"]').forEach(a => {
             if (a.dataset.mdblSeen === '1') return; a.dataset.mdblSeen = '1';
             const m = a.href.match(/imdb\.com\/title\/(tt\d+)/); if (!m) return;
@@ -250,6 +252,7 @@ function getRatingColor(bands, choice, r) {
             }
         });
 
+        // Inject Container
         [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
             if (a.dataset.mdblProc === '1') return;
             const m = a.href.match(/themoviedb\.org\/(movie|tv)\/(\d+)/); if (!m) return;
@@ -258,22 +261,26 @@ function getRatingColor(bands, choice, r) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const tmdbId = m[2];
             
-            document.querySelectorAll('.itemMiscInfo.itemMiscInfo-primary').forEach(b => {
-                const ref = b.querySelector('.mediaInfoItem.mediaInfoText.mediaInfoOfficialRating') || b.querySelector('.mediaInfoItem:last-of-type');
-                if (!ref) return;
-                if (ref.nextElementSibling && ref.nextElementSibling.classList?.contains('mdblist-rating-container')) return;
+            // ROBUST FIX: Attach to Main Wrapper to survive resize
+            const mainWrapper = findMainWrapper();
+            if (!mainWrapper) return;
 
-                const div = document.createElement('div');
-                div.className = 'mdblist-rating-container';
+            if (mainWrapper.querySelector('.mdblist-rating-container')) return;
 
-                let px = parseFloat(DISPLAY.posX); if (isNaN(px)) px = 0;
-                let py = parseFloat(DISPLAY.posY); if (isNaN(py)) py = 0;
+            const div = document.createElement('div');
+            div.className = 'mdblist-rating-container';
 
-                div.style.cssText += `display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-start;width:calc(100% + 6px);margin-left:-6px;margin-top:${SPACING.ratingsTopGapPx}px;padding-right:0;box-sizing:border-box;transform:translate(${px}px,${py}px);z-index:99999;position:relative;pointer-events:auto;`;
-                
-                Object.assign(div.dataset, { type, tmdbId, mdblFetched: '0' });
-                ref.insertAdjacentElement('afterend', div);
-            });
+            let px = parseFloat(DISPLAY.posX); if (isNaN(px)) px = 0;
+            let py = parseFloat(DISPLAY.posY); if (isNaN(py)) py = 0;
+            
+            // AUTOMATIC RIGHT ALIGNMENT (flex-end)
+            // This ensures they move left when the window shrinks
+            const justify = 'flex-end';
+
+            div.style.cssText += `display:flex;flex-wrap:wrap;align-items:center;justify-content:${justify};width:100%;margin-top:${SPACING.ratingsTopGapPx}px;box-sizing:border-box;transform:translate(${px}px,${py}px);z-index:99999;position:relative;pointer-events:auto;flex-shrink:0;`;
+            
+            Object.assign(div.dataset, { type, tmdbId, mdblFetched: '0' });
+            mainWrapper.appendChild(div);
         });
         hideDefaultRatingsOnce();
     }
@@ -892,7 +899,7 @@ function getRatingColor(bands, choice, r) {
         prefs.display.colorNumbers = panel.querySelector('#d_colorNumbers').checked;
         prefs.display.colorIcons = panel.querySelector('#d_colorIcons').checked;
         prefs.display.showPercentSymbol = panel.querySelector('#d_showPercent').checked;
-
+        
         prefs.display.posX = parseInt(panel.querySelector('#d_posX').value || '0', 10);
         prefs.display.posY = parseInt(panel.querySelector('#d_posY').value || '0', 10);
 
