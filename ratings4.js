@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v7.4.0 — Design Restored & Live Fixed)
+// @name         Jellyfin Ratings (v7.5.0 — Menu Repair & Live Preview)
 // @namespace    https://mdblist.com
-// @version      7.4.0
-// @description  Restores v7.2.0 UI exactly. Adds functional Live Preview for all settings. Fixed Compact Mode.
+// @version      7.5.0
+// @description  Restores v7.2.0 UI. Fixes broken menu opening. Fixes missing icons in menu. Full Live Preview.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v7.4.0 loading...');
+console.log('[Jellyfin Ratings] v7.5.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -66,7 +66,6 @@ const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
 const CACHE_DURATION_RT = 7 * 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 
-// Icon Map matching internal keys
 const LOGO = {
     imdb: `${ICON_BASE}/IMDb.png`,
     tmdb: `${ICON_BASE}/TMDB.png`,
@@ -78,10 +77,10 @@ const LOGO = {
     rotten_tomatoes_critic: `${ICON_BASE}/Rotten_Tomatoes.png`,
     rotten_tomatoes_audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
     metacritic_critic: `${ICON_BASE}/Metacritic.png`,
-    metacritic_user: `${ICON_BASE}/mus2.png`,
+    metacritic_user: `${ICON_BASE}/mus2.png`
 };
 
-// Labels for Menu
+// Maps internal keys to Display Labels
 const LABEL = {
     imdb: 'IMDb', tmdb: 'TMDb', trakt: 'Trakt', letterboxd: 'Letterboxd',
     rotten_tomatoes_critic: 'Rotten Tomatoes (Critic)', rotten_tomatoes_audience: 'Rotten Tomatoes (Audience)',
@@ -101,7 +100,7 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
-        // Merge to handle new properties if any
+        // Deep merge
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -143,7 +142,7 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; /* Auto-Right */
+            justify-content: flex-end; /* Auto-Right Anchor */
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -163,7 +162,7 @@ function updateGlobalStyles() {
         #customEndsAt:hover { opacity: 1.0; text-decoration: underline; }
     `;
 
-    // CSS-based ordering and visibility for instant updates
+    // Live Order & Visibility
     Object.keys(CFG.priorities).forEach(key => {
         const isEnabled = CFG.sources[key];
         const order = CFG.priorities[key] || 999;
@@ -188,11 +187,9 @@ function getRatingColor(bands, choice, r) {
     return SWATCHES[band][idx];
 }
 
-// Live Preview of Colors & Text
 function refreshDomElements() {
-    // First update CSS vars/rules
-    updateGlobalStyles(); 
-
+    updateGlobalStyles(); // Update position & visibility first
+    
     document.querySelectorAll('.mdbl-rating-item').forEach(el => {
         const score = parseFloat(el.dataset.score);
         if (isNaN(score)) return;
@@ -218,17 +215,31 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-// Global Click Listener for Settings
+// --- Open Settings (Public) ---
+window.MDBL_OPEN_SETTINGS = function() {
+    let panel = document.getElementById('mdbl-panel');
+    if(!panel) {
+        // Re-init if missing
+        initMenu(); 
+        panel = document.getElementById('mdbl-panel');
+    }
+    if(panel) {
+        // Refresh values in case config changed
+        renderMenuContent(panel);
+        panel.style.display = 'block';
+    }
+};
+
 document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt') {
         e.preventDefault(); e.stopPropagation();
-        if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
+        window.MDBL_OPEN_SETTINGS();
         return;
     }
     const item = e.target.closest('.mdbl-rating-item');
     if (item && e.target.tagName === 'SPAN') {
         e.preventDefault(); e.stopPropagation();
-        if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
+        window.MDBL_OPEN_SETTINGS();
     }
 }, true);
 
@@ -278,7 +289,7 @@ function updateEndsAt() {
 
 function createRatingHtml(key, val, link, count, title) {
     if (val === null || isNaN(val)) return '';
-    if (!LOGO[key]) return '';
+    if (!LOGO[key]) return ''; // Check valid icon
 
     const n = parseFloat(val) * (SCALE[key] || 1);
     const r = Math.round(n);
@@ -316,6 +327,7 @@ function renderRatings(container, data, imdbId) {
             else if (s.includes('myanimelist')) add('myanimelist', v, '#', c, 'MAL');
         });
     }
+    
     container.innerHTML = html;
     refreshDomElements();
 }
@@ -382,17 +394,20 @@ function scan() {
 
 setInterval(scan, 500);
 
-
 /* ==========================================================================
-   4. SETTINGS MENU (UI)
+   4. SETTINGS MENU (INIT)
 ========================================================================== */
-(function initMenu() {
-    // --- UI CSS from v7.2.0 Restored ---
+// UI State variables for Drag-Drop
+let dragSrc = null;
+
+function initMenu() {
+    if(document.getElementById('mdbl-panel')) return; // Already exists
+
     const css = `
     :root { --mdbl-right-col: 48px; --mdbl-right-col-wide: 200px; }
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
-        color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
+        color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; }
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:12px 16px; border-bottom:1px solid rgba(255,255,255,0.08);
         display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); }
     #mdbl-panel header h3 { margin:0; font-size:15px; font-weight:700; flex:1; }
@@ -412,7 +427,6 @@ setInterval(scan, 500);
         height:32px; line-height: 32px; box-sizing:border-box; display:inline-block;
     }
     #mdbl-panel .mdbl-select { width:140px; justify-self:end; }
-    
     #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
     #mdbl-panel input.mdbl-num-input { width: 56px; text-align: center; }
 
@@ -439,7 +453,6 @@ setInterval(scan, 500);
     #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
     #mdbl-panel .mdbl-actions .mdbl-compact { display:inline-flex; align-items:center; gap:6px; opacity:0.95; }
     
-    /* Compact Mode */
     #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; --mdbl-right-col-wide:220px; width:460px; }
     #mdbl-panel[data-compact="1"] header { padding:6px 12px; }
     #mdbl-panel[data-compact="1"] .mdbl-section { padding:2px 12px; gap:2px; }
@@ -461,24 +474,22 @@ setInterval(scan, 500);
         #mdbl-panel .mdbl-select { width: 140px; }
     }
     `;
-    const style = document.createElement('style');
-    style.textContent = css;
-    document.head.appendChild(style);
+    if (!document.getElementById('mdbl-settings-css')) {
+        const style = document.createElement('style');
+        style.id = 'mdbl-settings-css';
+        style.textContent = css;
+        document.head.appendChild(style);
+    }
 
     const panel = document.createElement('div');
     panel.id = 'mdbl-panel';
     document.body.appendChild(panel);
 
-    window.MDBL_OPEN_SETTINGS = () => {
-        renderMenuContent(panel);
-        panel.style.display = 'block';
-    };
-
-    // Draggable
+    // Draggable Logic
     let isDrag = false, sx, sy, lx, ly;
     panel.addEventListener('mousedown', (e) => {
         if (window.innerWidth <= 600 || ['INPUT','SELECT','BUTTON'].includes(e.target.tagName)) return;
-        if (e.target.closest('.sec') || e.target.closest('.mdbl-section')) return; 
+        if (e.target.closest('.mdbl-section') && !e.target.closest('header')) return; 
         isDrag = true; const r = panel.getBoundingClientRect();
         lx = r.left; ly = r.top; sx = e.clientX; sy = e.clientY;
         panel.style.right = 'auto'; panel.style.bottom = 'auto';
@@ -490,12 +501,16 @@ setInterval(scan, 500);
         panel.style.top = (ly + (e.clientY - sy)) + 'px';
     });
     document.addEventListener('mouseup', () => isDrag = false);
-
+    
     // Init Compact
     if(loadConfig().display.compactLevel) panel.setAttribute('data-compact', '1');
-})();
+}
+
+// Call Init immediately
+initMenu();
 
 function renderMenuContent(panel) {
+    // Helper
     const row = (label, input, wide) => `<div class="mdbl-row ${wide?'wide':''}"><span>${label}</span>${input}</div>`;
     
     let html = `
@@ -504,7 +519,7 @@ function renderMenuContent(panel) {
       <button id="mdbl-close">✕</button>
     </header>
     <div class="mdbl-section" id="mdbl-sec-keys">
-       ${(!getInjectorKey()) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${(JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST)||''}"></div>` : ''}
+       ${(!INJ_KEYS.MDBLIST && !JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${(JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST)||''}"></div>` : ''}
     </div>
     <div class="mdbl-section">
        <div class="mdbl-subtle">Sources (drag to reorder)</div>
@@ -558,9 +573,9 @@ function renderMenuContent(panel) {
     `;
     
     panel.innerHTML = html;
-    const sList = panel.querySelector('#mdbl-sources');
     
     // Populate Sources
+    const sList = panel.querySelector('#mdbl-sources');
     Object.keys(CFG.priorities).sort((a,b) => CFG.priorities[a]-CFG.priorities[b]).forEach(k => {
          if (!CFG.sources.hasOwnProperty(k)) return;
          const div = document.createElement('div');
@@ -578,10 +593,10 @@ function renderMenuContent(panel) {
          sList.appendChild(div);
     });
 
-    // Event Binding
+    // Bindings
     panel.querySelector('#mdbl-close').onclick = () => panel.style.display = 'none';
     
-    // --- Live Preview Logic ---
+    // Live Updates
     const updateLiveAll = () => {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
@@ -596,42 +611,40 @@ function renderMenuContent(panel) {
         panel.querySelector('#label_top_tier').textContent = `Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)`;
         ['red','orange','yg','mg'].forEach(k => panel.querySelector(`#sw_${k}`).style.background = SWATCHES[k][CFG.display.colorChoice[k]]);
         
-        refreshDomElements(); // Trigger LIVE DOM updates
+        refreshDomElements();
     };
-
-    // Bind Inputs
     panel.querySelectorAll('input, select').forEach(el => {
         if(el.type === 'range' || el.type === 'text' || el.type === 'number') el.addEventListener('input', updateLiveAll);
         else el.addEventListener('change', updateLiveAll);
     });
-    
+
+    // Position Live
     const updatePos = (axis, val) => {
         CFG.display[axis] = parseInt(val);
         panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_rng`).value = val;
         panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_num`).value = val;
         updateGlobalStyles();
     };
-    const bind = (id, fn) => { const el=panel.querySelector(id); if(el) el.addEventListener('input', fn); };
-    bind('#d_x_rng', (e) => updatePos('posX', e.target.value));
-    bind('#d_x_num', (e) => updatePos('posX', e.target.value));
-    bind('#d_y_rng', (e) => updatePos('posY', e.target.value));
-    bind('#d_y_num', (e) => updatePos('posY', e.target.value));
+    const bindPos = (id, fn) => panel.querySelector(id).addEventListener('input', fn);
+    bindPos('#d_x_rng', (e) => updatePos('posX', e.target.value));
+    bindPos('#d_x_num', (e) => updatePos('posX', e.target.value));
+    bindPos('#d_y_rng', (e) => updatePos('posY', e.target.value));
+    bindPos('#d_y_num', (e) => updatePos('posY', e.target.value));
     
-    // Source Checks
+    // Source Live
     panel.querySelectorAll('.src-check').forEach(cb => {
         cb.addEventListener('change', (e) => {
             CFG.sources[e.target.closest('.mdbl-source').dataset.key] = e.target.checked;
-            updateGlobalStyles(); // Toggle visibility via CSS
+            updateGlobalStyles();
         });
     });
 
-    // Compact Toggle
+    // Compact
     panel.querySelector('#mdbl-compact-toggle').addEventListener('change', (e) => {
         panel.setAttribute('data-compact', e.target.checked ? '1':'0');
     });
-    if(CFG.display.compactLevel) panel.setAttribute('data-compact', '1');
 
-    // Drag Drop (Live Sort)
+    // Drag & Drop (Live)
     let dragSrc = null;
     panel.querySelectorAll('.mdbl-src-row').forEach(row => {
         row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; row.style.opacity = '0.5'; });
@@ -641,42 +654,28 @@ function renderMenuContent(panel) {
             e.preventDefault();
             if (dragSrc !== row) {
                 const list = row.parentNode;
-                const all = [...list.querySelectorAll('.mdbl-src-row')];
-                const srcI = all.indexOf(dragSrc);
-                const tgtI = all.indexOf(row);
+                const srcI = [...list.children].indexOf(dragSrc);
+                const tgtI = [...list.children].indexOf(row);
                 if (srcI < tgtI) list.insertBefore(dragSrc, row.nextSibling);
                 else list.insertBefore(dragSrc, row);
                 
-                // Update priorities
                 [...list.querySelectorAll('.mdbl-src-row')].forEach((r, i) => CFG.priorities[r.dataset.key] = i+1);
-                updateGlobalStyles(); // Re-render CSS order
+                updateGlobalStyles();
             }
         });
     });
 
-    // Save
+    // Save/Reset
     panel.querySelector('#mdbl-btn-save').onclick = () => {
         CFG.display.compactLevel = panel.querySelector('#mdbl-compact-toggle').checked ? 1 : 0;
         saveConfig();
-        const keyInput = panel.querySelector('#mdbl-key-mdb');
-        if(keyInput && keyInput.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: keyInput.value.trim()}));
+        const ki = panel.querySelector('#mdbl-key-mdb');
+        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
         location.reload();
     };
-    
-    // Reset
     panel.querySelector('#mdbl-btn-reset').onclick = () => {
-        if(confirm('Reset all settings?')) {
-            localStorage.removeItem('mdbl_prefs');
-            location.reload();
-        }
+        if(confirm('Reset all settings?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }
     };
-    
-    // Key Logic
-    const getInjectorKey = () => { try { return (window.MDBL_KEYS && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; } catch { return ''; } };
-    if (getInjectorKey()) {
-       const kw = panel.querySelector('#mdbl-sec-keys');
-       if(kw) { kw.innerHTML = ''; kw.style.display = 'none'; }
-    }
 }
 
 function createColorBandRow(id, lbl, val, key) {
