@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.1.0 — Nav Recycling Fix)
+// @name         Jellyfin Ratings (v9.2.0 — Nav & Menu Rescue)
 // @namespace    https://mdblist.com
-// @version      9.1.0
-// @description  Unified ratings. Fixes ratings not loading on navigation (resets processed flags). Fixes Menu opening.
+// @version      9.2.0
+// @description  Unified ratings. Fixes navigation/loading issues by using loose selectors & aggressive reset. Fixes Menu click.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v9.1.0 loading...');
+console.log('[Jellyfin Ratings] v9.2.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -98,6 +98,7 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
+        delete p.display.align; // Cleanup old key
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -141,7 +142,7 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; 
+            justify-content: flex-end; /* Always Right Aligned */
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -160,6 +161,8 @@ function updateGlobalStyles() {
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
+        
+        /* Ensure Visibility */
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
         
         /* Ends At & Settings Icon */
@@ -233,12 +236,16 @@ function fixUrl(url, domain) {
     return `https://${domain}/${clean}`;
 }
 
+// Menu Click Handler
 document.addEventListener('click', (e) => {
-    // Trigger Settings
-    if (e.target.id === 'customEndsAt' || e.target.closest('#mdbl-settings-trigger')) {
+    // Check for Settings Trigger (Text or Icon)
+    const trigger = e.target.closest('#customEndsAt') || e.target.closest('#mdbl-settings-trigger');
+    if (trigger) {
         e.preventDefault(); e.stopPropagation();
-        // Ensure Menu Exists before opening
-        if (!document.getElementById('mdbl-panel')) initMenu(); 
+        
+        // Safety: Re-init menu if missing from DOM
+        if(!document.getElementById('mdbl-panel')) initMenu();
+        
         if (window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
     }
 }, true);
@@ -265,6 +272,7 @@ function parseRuntimeToMinutes(text) {
 }
 
 function updateEndsAt() {
+    // Hide native
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
@@ -429,16 +437,16 @@ function fetchRatings(container, tmdbId, type) {
 }
 
 function scan() {
-    // --- RECYCLING FIX START ---
+    // Detect URL Change (Navigation)
     if (window.location.href !== lastUrl) {
         lastUrl = window.location.href;
         currentImdbId = null; 
+        // Aggressively clear old containers
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
-        // Reset Processed Flag on ALL buttons to force re-check on new page
+        // Reset processed flags on ALL links to force re-scan
         document.querySelectorAll('a[data-mdbl-proc]').forEach(el => delete el.dataset.mdblProc);
     }
-    // --- RECYCLING FIX END ---
-
+    
     updateEndsAt();
 
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
@@ -452,17 +460,19 @@ function scan() {
         }
     }
 
-    [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
+    // LOOSE SELECTOR for Maximum Compatibility (Restored from v7.x)
+    // Searches for ANY link to tmdb, not just those with .emby-button class
+    [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
         if (a.dataset.mdblProc === '1') return;
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
             
+            // Only mark as processed if we successfully find a place to inject
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper && !wrapper.querySelector('.mdblist-rating-container')) {
-                // Only mark as processed if we actually insert
-                a.dataset.mdblProc = '1';
+                a.dataset.mdblProc = '1'; // Mark now
                 
                 const div = document.createElement('div');
                 div.className = 'mdblist-rating-container';
