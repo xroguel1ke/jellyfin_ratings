@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v8.1.0 — Visibility & Link Fix)
+// @name         Jellyfin Ratings (v8.2.0 — Stable Base & Forced Links)
 // @namespace    https://mdblist.com
-// @version      8.1.0
-// @description  Restores visibility (looser scanner). Forces absolute links for all providers. Theme Sync & Live Preview active.
+// @version      8.2.0
+// @description  Restored v7.8.0 base (proven visibility). Forced external link generation to prevent 404s. Theme Sync & Live Preview active.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v8.1.0 loading...');
+console.log('[Jellyfin Ratings] v8.2.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -149,10 +149,9 @@ function updateGlobalStyles() {
             text-decoration: none;
             transition: transform 0.2s ease;
             cursor: pointer;
-            color: inherit;
         }
         .mdbl-rating-item:hover {
-            transform: scale(1.15) rotate(3deg);
+            transform: scale(1.15) rotate(2deg);
             z-index: 1000;
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
@@ -211,15 +210,6 @@ updateGlobalStyles();
 /* ==========================================================================
    3. MAIN LOGIC
 ========================================================================== */
-
-// Link Fixer
-function fixUrl(url, domain) {
-    if (!url) return null;
-    if (url.startsWith('http')) return url;
-    // Remove leading slash if present
-    const cleanPath = url.startsWith('/') ? url.substring(1) : url;
-    return `https://${domain}/${cleanPath}`;
-}
 
 document.addEventListener('click', (e) => {
     if (e.target.id === 'customEndsAt') {
@@ -282,23 +272,32 @@ function createRatingHtml(key, val, link, count, title) {
     const n = parseFloat(val) * (SCALE[key] || 1);
     const r = Math.round(n);
     
-    // Fallback: if link is relative or missing, force '#' to avoid 404 on local server
-    let safeLink = link;
-    if (!safeLink || safeLink === '#') safeLink = '#';
-    else if (!safeLink.startsWith('http')) safeLink = '#'; // Should be handled by fixUrl before, but safety check
-
+    // Prevent empty links (which default to current page)
+    const hasLink = link && link !== '#' && link.startsWith('http');
+    const tag = hasLink ? 'a' : 'div';
+    const hrefAttr = hasLink ? `href="${link}" target="_blank"` : '';
+    
     return `
-        <a href="${safeLink}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}">
+        <${tag} ${hrefAttr} class="mdbl-rating-item" data-source="${key}" data-score="${r}">
             <img src="${LOGO[key]}" alt="${title}" title="${title} ${count ? '('+count+')' : ''}">
             <span title="${title}">${CFG.display.showPercentSymbol ? r+'%' : r}</span>
-        </a>
+        </${tag}>
     `;
+}
+
+// HELPER: Force valid absolute URL
+function fixUrl(url, domain) {
+    if (!url) return null;
+    if (url.startsWith('http')) return url;
+    const clean = url.startsWith('/') ? url.substring(1) : url;
+    return `https://${domain}/${clean}`;
 }
 
 function renderRatings(container, data, pageImdbId, type) {
     let html = '';
     const add = (k, v, lnk, cnt, tit) => html += createRatingHtml(k, v, lnk, cnt, tit);
     
+    // Robust ID extraction
     const ids = {
         imdb: data.imdbid || data.imdb_id || pageImdbId,
         tmdb: data.id || data.tmdbid || data.tmdb_id || container.dataset.tmdbId,
@@ -314,52 +313,51 @@ function renderRatings(container, data, pageImdbId, type) {
             const s = (r.source || '').toLowerCase();
             const v = r.value;
             const c = r.votes || r.count;
-            const apiLink = r.url;
+            const apiLink = r.url; 
 
+            // --- FORCED LINKS LOGIC ---
             if (s.includes('imdb')) {
-                let lnk = apiLink;
-                if (!lnk || !lnk.startsWith('http')) lnk = ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
+                // Always force our constructed link if we have an ID, it's safer
+                const lnk = ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : (apiLink && apiLink.startsWith('http') ? apiLink : null);
                 add('imdb', v, lnk, c, 'IMDb');
             } 
             else if (s.includes('tmdb')) {
-                let lnk = apiLink;
-                if (!lnk || !lnk.startsWith('http')) lnk = ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
+                const lnk = `https://www.themoviedb.org/${type}/${ids.tmdb}`;
                 add('tmdb', v, lnk, c, 'TMDb');
             }
             else if (s.includes('trakt')) {
-                let lnk = fixUrl(apiLink, 'trakt.tv');
-                if (!lnk || lnk.includes('trakt.tv/#')) lnk = ids.trakt ? `https://trakt.tv/${traktType}/${ids.trakt}` : '#';
+                const lnk = ids.trakt ? `https://trakt.tv/${traktType}/${ids.trakt}` : null;
                 add('trakt', v, lnk, c, 'Trakt');
             }
             else if (s.includes('letterboxd')) {
-                let lnk = fixUrl(apiLink, 'letterboxd.com');
-                if (!lnk || lnk.includes('letterboxd.com/#')) lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+                // LB links from API are often relative. Force absolute via ID if possible.
+                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
                 add('letterboxd', v, lnk, c, 'Letterboxd');
             }
             else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
-                add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com') || '#', c, 'RT Critic');
+                add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic');
             }
             else if (s.includes('popcorn') || s.includes('audience')) {
-                add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com') || '#', c, 'RT Audience');
+                add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience');
             }
             else if (s.includes('metacritic') && !s.includes('user')) {
                 let lnk = fixUrl(apiLink, 'metacritic.com');
-                if (!lnk || lnk.includes('metacritic.com/#')) lnk = ids.slug ? `https://www.metacritic.com/${metaType}/${ids.slug}` : '#';
+                if (!lnk && ids.slug) lnk = `https://www.metacritic.com/${metaType}/${ids.slug}`;
                 add('metacritic_critic', v, lnk, c, 'Metacritic');
             }
             else if (s.includes('metacritic') && s.includes('user')) {
                 let lnk = fixUrl(apiLink, 'metacritic.com');
-                if (!lnk || lnk.includes('metacritic.com/#')) lnk = ids.slug ? `https://www.metacritic.com/${metaType}/${ids.slug}/user-reviews` : '#';
+                if (!lnk && ids.slug) lnk = `https://www.metacritic.com/${metaType}/${ids.slug}/user-reviews`;
                 add('metacritic_user', v, lnk, c, 'User');
             }
             else if (s.includes('roger')) {
-                add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com') || '#', c, 'Roger Ebert');
+                add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert');
             }
             else if (s.includes('anilist')) {
-                add('anilist', v, fixUrl(apiLink, 'anilist.co') || '#', c, 'AniList');
+                add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList');
             }
             else if (s.includes('myanimelist')) {
-                add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net') || '#', c, 'MAL');
+                add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL');
             }
         });
     }
@@ -405,13 +403,15 @@ function scan() {
         }
     }
 
-    // --- Use Looser Selector for Visibility ---
-    [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
+    // Reverted to v7.8.0 selector for maximum compatibility
+    [...document.querySelectorAll('a.emby-button[href*="themoviedb.org/"]')].forEach(a => {
         if (a.dataset.mdblProc === '1') return;
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
+            // Do NOT set dataset.mdblProc yet, wait until we actually inject to be safe? 
+            // No, stick to standard logic.
             a.dataset.mdblProc = '1';
             
             const wrapper = document.querySelector('.itemMiscInfo');
