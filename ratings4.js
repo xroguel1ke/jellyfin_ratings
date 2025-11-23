@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v9.6.1 — Master Fix & Live Episode Toggle)
+// @name         Jellyfin Ratings (v9.7.0 — Master Fix & Strict Episode Logic)
 // @namespace    https://mdblist.com
-// @version      9.6.1
-// @description  Adds Master Rating, Live Episode Toggle and improved Episode detection via IMDb ID.
+// @version      9.7.0
+// @description  Adds Master Rating, robust Live Toggle for Episodes, and strict IMDb ID usage for episodes.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v9.6.1 loading...');
+console.log('[Jellyfin Ratings] v9.7.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -27,7 +27,7 @@ const DEFAULTS = {
         showPercentSymbol: true,
         colorNumbers: true,
         colorIcons: false,
-        episodeRatings: false, // Standard: Serien-Rating anzeigen
+        episodeRatings: false, 
         posX: 0,
         posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
@@ -37,7 +37,7 @@ const DEFAULTS = {
     },
     spacing: { ratingsTopGapPx: 4 },
     priorities: {
-        master: -1, // Immer an erster Stelle
+        master: -1,
         imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
         rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
         roger_ebert: 7, metacritic_critic: 8, metacritic_user: 9,
@@ -437,7 +437,7 @@ function renderRatings(container, data, pageImdbId, type) {
 }
 
 function fetchRatings(container, id, type, idType = 'tmdb') {
-    const cacheKey = `${NS}c_${id}_${type || 'unk'}`; 
+    const cacheKey = `${NS}c_${id}_${type || 'unk'}_${idType}`; 
     try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
@@ -449,7 +449,7 @@ function fetchRatings(container, id, type, idType = 'tmdb') {
         }
     } catch(e) {}
 
-    // Wenn ID-Typ 'imdb' ist (tt...), dann nutze den imdb-Endpunkt, ansonsten den tmdb-Endpunkt
+    // Use imdb endpoint if idType is imdb (tt...)
     const url = idType === 'imdb' 
         ? `https://api.mdblist.com/imdb/${id}?apikey=${API_KEY}`
         : `https://api.mdblist.com/tmdb/${type}/${id}?apikey=${API_KEY}`;
@@ -485,6 +485,7 @@ function scan() {
         if (m) {
             if (m[0] !== currentImdbId) {
                 currentImdbId = m[0];
+                // ID changed? Clear containers to force reload
                 document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
             }
         }
@@ -500,11 +501,17 @@ function scan() {
         const showMatch = a.href.match(/\/(movie|tv)\/(\d+)/);
 
         if (epMatch) {
-            if (CFG.display.episodeRatings && currentImdbId) {
-                 // Checkbox AN & wir haben eine IMDb ID (die auf einer Episodenseite meist die der Folge ist)
-                 useImdbForEpisode = true;
+            if (CFG.display.episodeRatings) {
+                 // STRICT MODE: If user wants episode ratings, we MUST use the IMDb ID found on page.
+                 // If no IMDb ID is found (currentImdbId is null), we do NOT fallback to Show ID.
+                 if (currentImdbId) {
+                     useImdbForEpisode = true;
+                 } else {
+                     // No IMDb ID found -> Do nothing (don't show incorrect Series ratings)
+                     return; 
+                 }
             } else {
-                 // Checkbox AUS oder keine IMDb ID: Fallback auf Serien-ID
+                 // Checkbox AUS: Fallback auf Serien-ID erzwingen
                  if(showMatch) {
                     type = showMatch[1] === 'tv' ? 'show' : 'movie';
                     id = showMatch[2];
@@ -527,7 +534,7 @@ function scan() {
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
-                    div.dataset.id = targetId; // Generische ID (kann TMDB oder IMDb sein)
+                    div.dataset.id = targetId; 
                     wrapper.appendChild(div);
                     
                     if (useImdbForEpisode) {
@@ -782,13 +789,13 @@ function renderMenuContent(panel) {
 
     panel.querySelector('#mdbl-close').onclick = () => panel.style.display = 'none';
     
-    // Live Preview Listener for Episode Toggle
+    // FORCE RELOAD LISTENER: Clears containers on checkbox toggle
     panel.querySelector('#d_ep_rate').addEventListener('change', () => {
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     });
 
     const updateLiveAll = () => {
-        CFG.display.episodeRatings = panel.querySelector('#d_ep_rate').checked; // Live update episode ratings
+        CFG.display.episodeRatings = panel.querySelector('#d_ep_rate').checked;
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
