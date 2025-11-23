@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.0 — Smart Wiki Link)
+// @name         Jellyfin Ratings (v10.1.1 — DDG Redirect Fix)
 // @namespace    https://mdblist.com
-// @version      10.1.0
-// @description  Master Rating links to Wikipedia via Google "I'm Feeling Lucky" for better accuracy.
+// @version      10.1.1
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky" to avoid Google Redirect Notice.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript>
 
-console.log('[Jellyfin Ratings] v10.1.0 loading...');
+console.log('[Jellyfin Ratings] v10.1.1 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -167,7 +167,6 @@ function updateGlobalStyles() {
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
         
-        /* IMPROVED CLICK STYLES */
         #customEndsAt { 
             font-size: inherit; opacity: 0.8; cursor: pointer; 
             margin-left: 10px; display: inline-block; vertical-align: baseline;
@@ -439,7 +438,7 @@ function renderRatings(container, data, pageImdbId, type) {
         });
     }
 
-    // --- MASTER RATING (Google "I'm Feeling Lucky" Wikipedia Link) ---
+    // --- MASTER RATING (DuckDuckGo "I'm Feeling Lucky" !ducky) ---
     if (masterCount > 0) {
         const average = masterSum / masterCount;
         
@@ -447,8 +446,8 @@ function renderRatings(container, data, pageImdbId, type) {
         const safeYear = (data.year || '').toString();
         const suffix = type === 'movie' ? 'film' : 'TV series';
         
-        // This URL triggers a Google search restricted to English Wikipedia and auto-redirects to the first result
-        const wikiUrl = `https://www.google.com/search?q=site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}&btnI`;
+        // Use DuckDuckGo with !ducky to avoid Google Redirect Notice page
+        const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}`;
 
         add('master', average, wikiUrl, masterCount, 'Master Rating', 'Sources');
     }
