@@ -7,7 +7,7 @@ const CONFIG = {
     isDevelopment: true, 
     
     // Your API Key
-    apiKey: 'MDBLIST-API-KEY-HERE',
+    apiKey: 'YOUR-MDBLIST-API-KEY-HERE',
     
     // Source URLs
     urls: {
