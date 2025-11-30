@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.9 — Layout Rewrite)
+// @name         Jellyfin Ratings (v10.1.10 — Clean UI & Ranges)
 // @namespace    https://mdblist.com
-// @version      10.1.9
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Compact Mode default. Fixed layout for wide sliders.
+// @version      10.1.10
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.9 loading...');
+console.log('[Jellyfin Ratings] v10.1.10 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -103,12 +103,11 @@ function loadConfig() {
             p.display.posX = 0; p.display.posY = 0;
         }
 
-        // --- FORCE CLAMP VALUES ON LOAD ---
-        // This ensures your old "1000" setting is instantly corrected
+        // --- FORCE CLAMP VALUES (Updated Ranges) ---
         if (p.display.posX > 500) p.display.posX = 500;
-        if (p.display.posX < -500) p.display.posX = -500;
-        if (p.display.posY > 400) p.display.posY = 400;
-        if (p.display.posY < -400) p.display.posY = -400;
+        if (p.display.posX < -700) p.display.posX = -700; // X Min -700
+        if (p.display.posY > 500) p.display.posY = 500;
+        if (p.display.posY < -500) p.display.posY = -500; // Y Min -500
         // ----------------------------------
 
         return {
@@ -177,9 +176,11 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         
+        /* Settings Button */
         .mdbl-settings-btn {
-            opacity: 0.6; margin-left: 8px; border-left: 1px solid rgba(255,255,255,0.2); 
-            padding: 4px 8px; cursor: pointer !important; pointer-events: auto !important;
+            opacity: 0.6; margin-right: 8px; border-right: 1px solid rgba(255,255,255,0.2); 
+            padding: 4px 8px 4px 0; /* Add padding right */
+            cursor: pointer !important; pointer-events: auto !important;
         }
         .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
         .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; pointer-events: none; }
@@ -193,6 +194,15 @@ function updateGlobalStyles() {
             margin-left: 10px; display: inline-block; vertical-align: baseline;
             pointer-events: auto; position: relative; z-index: 9999;
             padding: 2px 4px;
+        }
+
+        /* --- AGGRESSIVE HIDING OF DEFAULT RATINGS --- */
+        .starRatingContainer, 
+        .mediaInfoOfficialRating, 
+        .mediaInfoCriticRating, 
+        .mediaInfoAudienceRating,
+        .starRating {
+            display: none !important;
         }
     `;
 
@@ -300,6 +310,7 @@ function updateEndsAt() {
         }
     }
     
+    // Hide original "Ends at" text if found
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
@@ -308,6 +319,9 @@ function updateEndsAt() {
              else el.style.display = ''; 
         }
     });
+
+    // Also JS Hide defaults just in case CSS misses them
+    document.querySelectorAll('.starRatingContainer, .mediaInfoOfficialRating, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
 
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
@@ -350,7 +364,13 @@ function createRatingHtml(key, val, link, count, title, kind) {
 }
 
 function renderRatings(container, data, pageImdbId, type) {
-    let html = '';
+    // 1. START WITH SETTINGS BUTTON (First item)
+    let html = `
+    <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
+       <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+    </div>
+    `;
+
     const add = (k, v, lnk, cnt, tit, kind) => html += createRatingHtml(k, v, lnk, cnt, tit, kind);
     
     const ids = {
@@ -440,12 +460,6 @@ function renderRatings(container, data, pageImdbId, type) {
         const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}`;
         add('master', average, wikiUrl, masterCount, 'Master Rating', 'Sources');
     }
-
-    html += `
-    <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
-       <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
-    </div>
-    `;
 
     container.innerHTML = html;
     refreshDomElements();
@@ -725,8 +739,8 @@ function renderMenuContent(panel) {
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
         
-        ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -500, 500, CFG.display.posX)}
-        ${sliderRow('Position Y (px)', 'd_y_rng', 'd_y_num', -400, 400, CFG.display.posY)}
+        ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -700, 500, CFG.display.posX)}
+        ${sliderRow('Position Y (px)', 'd_y_rng', 'd_y_num', -500, 500, CFG.display.posY)}
 
         <hr>
         
