@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.3 — Robust UI)
+// @name         Jellyfin Ratings (v10.1.4 — Fixed Settings & Runtime)
 // @namespace    https://mdblist.com
-// @version      10.1.3
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Fixes UI visibility and clickability.
+// @version      10.1.4
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Settings button is now inside the rating bar.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.3 loading...');
+console.log('[Jellyfin Ratings] v10.1.4 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -166,7 +166,13 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         
-        /* Force container to be clickable and visible */
+        .mdbl-settings-btn {
+            opacity: 0.6; margin-left: 8px; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 8px;
+        }
+        .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
+        .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
+        
+        /* Ensure metadata area is visible */
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { 
             overflow: visible !important; 
             contain: none !important;
@@ -175,21 +181,11 @@ function updateGlobalStyles() {
         }
         
         #customEndsAt { 
-            font-size: inherit; opacity: 0.8; cursor: pointer; 
+            font-size: inherit; opacity: 0.9; cursor: default; 
             margin-left: 10px; display: inline-block; vertical-align: baseline;
             pointer-events: auto; position: relative; z-index: 9999;
             padding: 2px 4px;
         }
-        #customEndsAt:hover { opacity: 1.0; text-decoration: underline; }
-        
-        #mdbl-settings-trigger {
-            display: inline-flex; align-items: center; justify-content: center;
-            margin-left: 6px; cursor: pointer !important; opacity: 0.7; transition: opacity 0.2s, transform 0.2s;
-            width: 1.3em; height: 1.3em; vertical-align: middle;
-            pointer-events: auto; position: relative; z-index: 9999;
-        }
-        #mdbl-settings-trigger:hover { opacity: 1; transform: rotate(45deg); }
-        #mdbl-settings-trigger svg { width: 100%; height: 100%; fill: currentColor; pointer-events: none; }
     `;
 
     Object.keys(CFG.priorities).forEach(key => {
@@ -218,7 +214,7 @@ function getRatingColor(bands, choice, r) {
 
 function refreshDomElements() {
     updateGlobalStyles(); 
-    document.querySelectorAll('.mdbl-rating-item').forEach(el => {
+    document.querySelectorAll('.mdbl-rating-item:not(.mdbl-settings-btn)').forEach(el => {
         const score = parseFloat(el.dataset.score);
         if (isNaN(score)) return;
         const color = getRatingColor(CFG.display.colorBands, CFG.display.colorChoice, score);
@@ -266,6 +262,7 @@ function formatTime(minutes) {
 
 function parseRuntimeToMinutes(text) {
     if (!text) return 0;
+    // Match "1 h 45 m", "105 min", "2 hr", "2 std 30 min"
     let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
     if (m && (m[1] || m[2])) {
         const h = parseInt(m[1] || '0', 10);
@@ -279,53 +276,35 @@ function parseRuntimeToMinutes(text) {
 
 function updateEndsAt() {
     const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
-    
-    // Ensure the Settings Button exists regardless of runtime calculation
-    if (primary) {
-        let icon = primary.querySelector('#mdbl-settings-trigger');
-        if (!icon) {
-            icon = document.createElement('div');
-            icon.id = 'mdbl-settings-trigger';
-            icon.title = 'Settings';
-            // Gear SVG
-            icon.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>`;
-            
-            icon.onclick = (e) => {
-                e.preventDefault(); 
-                e.stopPropagation();
-                openSettingsMenu();
-            };
-            primary.appendChild(icon);
-        }
-    }
+    if (!primary) return;
 
-    // Attempt to calculate runtime
+    // Aggressive search for runtime in the detail container
     let minutes = 0;
-    if (primary) {
-        for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')) {
-            const parsed = parseRuntimeToMinutes((el.textContent || '').trim());
-            if (parsed > 0) { minutes = parsed; break; }
-        }
-        if (minutes === 0) minutes = parseRuntimeToMinutes((primary.textContent || '').trim());
-    }
-
-    // Logic: If minutes found > hide original, show custom.
-    //        If minutes NOT found > show original, hide custom.
+    const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
     
+    if (detailContainer) {
+        // Look at all text nodes in the area
+        const walker = document.createTreeWalker(detailContainer, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        while ((node = walker.nextNode())) {
+            const val = node.nodeValue.trim();
+            if (val.length > 0 && val.length < 20 && /\d/.test(val)) {
+                const p = parseRuntimeToMinutes(val);
+                if (p > 0) { minutes = p; break; }
+            }
+        }
+    }
+    
+    // Logic: If minutes found > hide original "Ends at" text if present, show custom.
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
-        if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
-        
+        if (el.id === 'customEndsAt' || el.closest('.mdblist-rating-container')) return;
         const t = (el.textContent || '').toLowerCase();
-        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
+        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
              if (minutes > 0) el.style.display = 'none';
-             else el.style.display = ''; // Restore visibility if calculation failed
+             else el.style.display = ''; 
         }
     });
 
-    document.querySelectorAll('.mediaInfoCriticRating, .mediaInfoAudienceRating, .starRatingContainer').forEach(el => el.style.display = 'none');
-
-    if (!primary) return;
-    
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
         const content = `Ends at ${timeStr}`;
@@ -334,22 +313,16 @@ function updateEndsAt() {
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
-            span.title = 'Click to open Settings';
-            span.onclick = (e) => {
-                e.preventDefault(); 
-                e.stopPropagation();
-                openSettingsMenu();
-            };
+            span.title = 'Calculated finish time';
             
-            // Try to place it before the settings button
-            const icon = primary.querySelector('#mdbl-settings-trigger');
-            if(icon) primary.insertBefore(span, icon);
+            // Insert after the rating container or at the end
+            const rc = primary.querySelector('.mdblist-rating-container');
+            if (rc && rc.nextSibling) primary.insertBefore(span, rc.nextSibling);
             else primary.appendChild(span);
         }
         if (span.textContent !== content) span.textContent = content;
-        span.style.display = ''; // Ensure visible
+        span.style.display = ''; 
     } else {
-        // Remove custom ends at if runtime parsing failed
         const span = primary.querySelector('#customEndsAt');
         if(span) span.remove();
     }
@@ -466,16 +439,25 @@ function renderRatings(container, data, pageImdbId, type) {
         const safeTitle = encodeURIComponent(data.title || '');
         const safeYear = (data.year || '').toString();
         const suffix = type === 'movie' ? 'film' : 'TV series';
-        
-        // Use DuckDuckGo with !ducky to avoid Google Redirect Notice page
         const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}`;
 
         add('master', average, wikiUrl, masterCount, 'Master Rating', 'Sources');
     }
 
+    // --- APPEND SETTINGS BUTTON (Inline with ratings) ---
+    // This ensures it is always visible if the rating container is visible
+    html += `
+    <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
+       <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+    </div>
+    `;
+
     container.innerHTML = html;
     refreshDomElements();
 }
+
+// Global accessor for inline onclick
+window.MDBL_OPEN_SETTINGS_GL = () => openSettingsMenu();
 
 function fetchRatings(container, tmdbId, type) {
     const cacheKey = `${NS}c_${tmdbId}`;
@@ -508,7 +490,6 @@ function scan() {
     if (window.location.pathname !== lastPath) {
         lastPath = window.location.pathname;
         currentImdbId = null; 
-        // Force cleanup to allow re-injection on recycled pages
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     }
     // ----------------------------------------
@@ -534,12 +515,9 @@ function scan() {
             
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper) {
-                // Check if a container for THIS ID already exists
                 const existing = wrapper.querySelector(`.mdblist-rating-container[data-tmdb-id="${id}"]`);
                 if (!existing) {
-                    // Remove any OLD container (wrong ID)
                     wrapper.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
-
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
@@ -696,7 +674,7 @@ function initMenu() {
     
     // Fix: Close on click outside
     document.addEventListener('mousedown', (e) => {
-        if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('#mdbl-settings-trigger')) {
+        if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('.mdbl-settings-btn')) {
             panel.style.display = 'none';
         }
     });
