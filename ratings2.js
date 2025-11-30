@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.44 — Link Perfected)
+// @name         Jellyfin Ratings (v10.1.45 — Hybrid Stable)
 // @namespace    https://mdblist.com
-// @version      10.1.44
-// @description  Master Rating links to Wikipedia. Gear icon first. Fixes TMDB 404s, AniList IDs, and Roger Ebert links.
+// @version      10.1.45
+// @description  Master Rating links to Wikipedia. Gear icon first. Fixes Roger Ebert & Anime links using proven v10.1.12 logic + stable loader.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.44 loading...');
+console.log('[Jellyfin Ratings] v10.1.45 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -313,34 +313,39 @@ function updateEndsAt() {
     }
 }
 
-// === SMART LINK BUILDER ===
+// === SMART LINK BUILDER (RESTORED v12 LOGIC) ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
-    // Convert 'show' to 'tv' for external sites
-    const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
     
-    // If it's a full URL, trust it mostly (except for known issues)
-    if (sLink.startsWith('http') && key !== 'metacritic_user') return sLink;
-
     switch(key) {
-        case 'imdb': 
-            return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': 
-            return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        case 'trakt': 
-            return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
-        case 'letterboxd': 
-            if (sLink.includes('/film/') || sLink.includes('/slug/')) {
-                return `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}`;
-            }
-            return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+        case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
+        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
+        case 'trakt': return ids.trakt ? `https://trakt.tv/${type}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
         
-        case 'metacritic_critic':
-        case 'metacritic_user': 
-            if (sLink.startsWith('/')) return `https://www.metacritic.com${sLink}`;
-            const slug = localSlug(title);
-            return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
+        case 'roger_ebert':
+            // RESTORED v12 Logic: fixUrl(apiLink, 'rogerebert.com')
+            if (!sLink) return '#';
+            if (sLink.startsWith('http')) return sLink;
+            const cleanEbert = sLink.startsWith('/') ? sLink.substring(1) : sLink;
+            return `https://www.rogerebert.com/${cleanEbert}`;
+
+        case 'anilist': 
+            // RESTORED v12 Logic adapted
+            if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
+            if (!sLink) return '#';
+            if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
+            if (sLink.startsWith('http')) return sLink;
+            const cleanAni = sLink.startsWith('/') ? sLink.substring(1) : sLink;
+            return `https://anilist.co/${cleanAni}`;
+            
+        case 'myanimelist': 
+             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
+             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
+             if (sLink.startsWith('http')) return sLink;
+             const cleanMal = sLink.startsWith('/') ? sLink.substring(1) : sLink;
+             return `https://myanimelist.net/${cleanMal}`;
 
         case 'rotten_tomatoes_critic':
         case 'rotten_tomatoes_audience': 
@@ -348,24 +353,13 @@ function generateLink(key, ids, apiLink, type, title) {
             if (sLink.length > 2) return `https://www.rottentomatoes.com/m/${sLink}`;
             return '#';
             
-        case 'anilist': 
-            // Prioritize IDs from map, then try url field
-            if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
-            if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
-            return 'https://anilist.co/';
-            
-        case 'myanimelist': 
-            if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
-            if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
-            return 'https://myanimelist.net/';
-            
-        case 'roger_ebert':
-             if (sLink.startsWith('/')) return `https://www.rogerebert.com${sLink}`;
-             // Fallback to search if no direct link
-             return `https://www.rogerebert.com/search?q=${safeTitle}`;
+        case 'metacritic_critic':
+        case 'metacritic_user': 
+            if (sLink.startsWith('/')) return `https://www.metacritic.com${sLink}`;
+            const slug = localSlug(title);
+            return slug ? `https://www.metacritic.com/${type === 'show' ? 'tv' : 'movie'}/${slug}` : '#';
 
-        default:
-            return '#';
+        default: return sLink.startsWith('http') ? sLink : '#';
     }
 }
 
