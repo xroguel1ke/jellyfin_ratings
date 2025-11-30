@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.45 — Hybrid Stable)
+// @name         Jellyfin Ratings (v10.1.46 — Link Logic Refined)
 // @namespace    https://mdblist.com
-// @version      10.1.45
-// @description  Master Rating links to Wikipedia. Gear icon first. Fixes Roger Ebert & Anime links using proven v10.1.12 logic + stable loader.
+// @version      10.1.46
+// @description  Master Rating links to Wikipedia. Gear icon first. Roger Ebert & Anime links fixed with search fallbacks. Stable loading.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.45 loading...');
+console.log('[Jellyfin Ratings] v10.1.46 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -313,39 +313,33 @@ function updateEndsAt() {
     }
 }
 
-// === SMART LINK BUILDER (RESTORED v12 LOGIC) ===
+// === REFINED LINK BUILDER ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
+    const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
     
-    switch(key) {
-        case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
-        case 'trakt': return ids.trakt ? `https://trakt.tv/${type}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
-        case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
-        
-        case 'roger_ebert':
-            // RESTORED v12 Logic: fixUrl(apiLink, 'rogerebert.com')
-            if (!sLink) return '#';
-            if (sLink.startsWith('http')) return sLink;
-            const cleanEbert = sLink.startsWith('/') ? sLink.substring(1) : sLink;
-            return `https://www.rogerebert.com/${cleanEbert}`;
+    // If absolute URL, usually trust it (except specific providers known to fail)
+    if (sLink.startsWith('http') && key !== 'metacritic_user') return sLink;
 
-        case 'anilist': 
-            // RESTORED v12 Logic adapted
-            if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
-            if (!sLink) return '#';
-            if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
-            if (sLink.startsWith('http')) return sLink;
-            const cleanAni = sLink.startsWith('/') ? sLink.substring(1) : sLink;
-            return `https://anilist.co/${cleanAni}`;
-            
-        case 'myanimelist': 
-             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
-             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
-             if (sLink.startsWith('http')) return sLink;
-             const cleanMal = sLink.startsWith('/') ? sLink.substring(1) : sLink;
-             return `https://myanimelist.net/${cleanMal}`;
+    switch(key) {
+        case 'imdb': 
+            return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
+        case 'tmdb': 
+            return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
+        case 'trakt': 
+            return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'letterboxd': 
+            if (sLink.includes('/film/') || sLink.includes('/slug/')) {
+                return `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}`;
+            }
+            return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+        
+        case 'metacritic_critic':
+        case 'metacritic_user': 
+            if (sLink.startsWith('/')) return `https://www.metacritic.com${sLink}`;
+            const slug = localSlug(title);
+            return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
 
         case 'rotten_tomatoes_critic':
         case 'rotten_tomatoes_audience': 
@@ -353,13 +347,34 @@ function generateLink(key, ids, apiLink, type, title) {
             if (sLink.length > 2) return `https://www.rottentomatoes.com/m/${sLink}`;
             return '#';
             
-        case 'metacritic_critic':
-        case 'metacritic_user': 
-            if (sLink.startsWith('/')) return `https://www.metacritic.com${sLink}`;
-            const slug = localSlug(title);
-            return slug ? `https://www.metacritic.com/${type === 'show' ? 'tv' : 'movie'}/${slug}` : '#';
+        case 'anilist': 
+            // 1. Try ID from metadata
+            if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
+            // 2. Try ID from URL field
+            if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
+            // 3. Try link from URL field
+            if (sLink.length > 2) return `https://anilist.co/${sLink.replace(/^\//, '')}`;
+            // 4. FALLBACK SEARCH
+            return `https://anilist.co/search/anime?search=${safeTitle}`;
+            
+        case 'myanimelist': 
+            if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
+            if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
+            return `https://myanimelist.net/anime.php?q=${safeTitle}`;
+            
+        case 'roger_ebert':
+             // Fix for Roger Ebert: if link doesn't start with /reviews/, assume it's just the slug
+             if (sLink.startsWith('/')) return `https://www.rogerebert.com${sLink}`;
+             if (sLink.length > 2) {
+                 // If it doesn't have 'reviews', add it
+                 if (!sLink.includes('reviews')) return `https://www.rogerebert.com/reviews/${sLink}`;
+                 return `https://www.rogerebert.com/${sLink}`;
+             }
+             // Fallback to search
+             return `https://www.rogerebert.com/search?q=${safeTitle}`;
 
-        default: return sLink.startsWith('http') ? sLink : '#';
+        default:
+            return '#';
     }
 }
 
@@ -525,7 +540,7 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === ROBUST ID HUNTER ===
+// === ROBUST ID HUNTER (DOM ONLY - RESTORED v10.1.23 LOGIC) ===
 
 function scan() {
     updateEndsAt();
@@ -544,6 +559,7 @@ function scan() {
         renderGearIcon(container, 'Scanning...');
         container.dataset.retries = 0; 
     } else if (container.dataset.jellyfinId !== currentJellyfinId) {
+        // Reset Logic on Navigation
         container.innerHTML = '';
         renderGearIcon(container, 'Scanning...');
         container.dataset.jellyfinId = currentJellyfinId;
@@ -555,6 +571,7 @@ function scan() {
 
     if (container.dataset.fetched === 'true') return;
 
+    // Retry Logic
     let retries = parseInt(container.dataset.retries || '0');
     if (retries > 50) {
         const st = container.querySelector('.mdbl-status-text');
@@ -567,6 +584,7 @@ function scan() {
 
     let type = 'movie', id = null, mode = 'tmdb';
     
+    // 1. TMDB
     for (let i = 0; i < document.links.length; i++) {
         const href = document.links[i].href;
         if (href.includes('themoviedb.org')) {
@@ -574,6 +592,7 @@ function scan() {
             if (m) { type = m[1] === 'tv' ? 'show' : 'movie'; id = m[2]; mode = 'tmdb'; break; }
         }
     }
+    // 2. IMDb
     if (!id) {
         for (let i = 0; i < document.links.length; i++) {
             const href = document.links[i].href;
