@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.3.3 — Stable Base)
+// @name         Jellyfin Ratings (v10.1.11 — Clean UI & Ranges)
 // @namespace    https://mdblist.com
-// @version      10.3.3
-// @description  Gear -> Master -> Others. Menu fixes based on v10.1.10. Parental rating visible. Resizable Menu.
+// @version      10.1.11
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.3.3 loading...');
+console.log('[Jellyfin Ratings] v10.1.11 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -103,12 +103,12 @@ function loadConfig() {
             p.display.posX = 0; p.display.posY = 0;
         }
 
-        // --- FORCE CLAMP VALUES ---
+        // --- FORCE CLAMP VALUES (Updated Ranges) ---
         if (p.display.posX > 500) p.display.posX = 500;
-        if (p.display.posX < -700) p.display.posX = -700;
+        if (p.display.posX < -700) p.display.posX = -700; // X Min -700
         if (p.display.posY > 500) p.display.posY = 500;
-        if (p.display.posY < -500) p.display.posY = -500;
-        // --------------------------
+        if (p.display.posY < -500) p.display.posY = -500; // Y Min -500
+        // ----------------------------------
 
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
@@ -176,11 +176,12 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         
-        /* Settings Button */
+        /* Settings Button - FORCE ORDER FIRST */
         .mdbl-settings-btn {
             opacity: 0.6; margin-right: 8px; border-right: 1px solid rgba(255,255,255,0.2); 
             padding: 4px 8px 4px 0; /* Add padding right */
             cursor: pointer !important; pointer-events: auto !important;
+            order: -9999 !important; /* Forces gear icon to always be first */
         }
         .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
         .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; pointer-events: none; }
@@ -196,16 +197,15 @@ function updateGlobalStyles() {
             padding: 2px 4px;
         }
 
-        /* --- PARENTAL RATING FIX --- */
-        /* Restore visibility and add spacing */
+        /* --- PARENTAL RATING RESTORATION --- */
         .mediaInfoOfficialRating {
-            display: inline-block !important;
-            margin-right: 14px !important; /* Standard Jellyfin spacing */
-            opacity: 1 !important;
+            display: inline-flex !important;
+            margin-right: 14px; /* Spacing between Rating and Ends At */
         }
 
-        /* --- HIDING DEFAULT RATINGS --- */
+        /* --- AGGRESSIVE HIDING OF DEFAULT RATINGS (EXCEPT Parental) --- */
         .starRatingContainer, 
+        /* .mediaInfoOfficialRating, <--- Removed this to show Parental Rating */
         .mediaInfoCriticRating, 
         .mediaInfoAudienceRating,
         .starRating {
@@ -277,9 +277,6 @@ function openSettingsMenu() {
     }
 }
 
-// Ensure global function exists immediately for inline clicks
-window.MDBL_OPEN_SETTINGS_GL = () => openSettingsMenu();
-
 function formatTime(minutes) {
     const d = new Date(Date.now() + minutes * 60000);
     const opts = CFG.display.endsAt24h 
@@ -322,13 +319,16 @@ function updateEndsAt() {
     
     // Hide original "Ends at" text if found
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
-        if (el.id === 'customEndsAt' || el.closest('.mdblist-rating-container')) return;
+        if (el.id === 'customEndsAt' || el.closest('.mdblist-rating-container') || el.classList.contains('mediaInfoOfficialRating')) return;
         const t = (el.textContent || '').toLowerCase();
         if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
              if (minutes > 0) el.style.display = 'none';
              else el.style.display = ''; 
         }
     });
+
+    // Also JS Hide defaults just in case CSS misses them
+    document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
 
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
@@ -371,10 +371,8 @@ function createRatingHtml(key, val, link, count, title, kind) {
 }
 
 function renderRatings(container, data, pageImdbId, type) {
-    let html = '';
-
-    // --- 1. GEAR ICON (Always First) ---
-    html += `
+    // 1. START WITH SETTINGS BUTTON (First item)
+    let html = `
     <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
        <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
     </div>
@@ -405,22 +403,62 @@ function renderRatings(container, data, pageImdbId, type) {
         data.ratings.forEach(r => {
             const s = (r.source || '').toLowerCase();
             const v = r.value;
-            // Track master ratings but don't add HTML yet
-            if (s.includes('imdb')) trackMaster(v, 'imdb');
-            else if (s.includes('tmdb')) trackMaster(v, 'tmdb');
-            else if (s.includes('trakt')) trackMaster(v, 'trakt');
-            else if (s.includes('letterboxd')) trackMaster(v, 'letterboxd');
-            else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) trackMaster(v, 'rotten_tomatoes_critic');
-            else if (s.includes('popcorn') || s.includes('audience')) trackMaster(v, 'rotten_tomatoes_audience');
-            else if (s.includes('metacritic') && !s.includes('user')) trackMaster(v, 'metacritic_critic');
-            else if (s.includes('metacritic') && s.includes('user')) trackMaster(v, 'metacritic_user');
-            else if (s.includes('roger')) trackMaster(v, 'roger_ebert');
-            else if (s.includes('anilist')) trackMaster(v, 'anilist');
-            else if (s.includes('myanimelist')) trackMaster(v, 'myanimelist');
+            const c = r.votes || r.count;
+            const apiLink = r.url; 
+
+            if (s.includes('imdb')) {
+                const lnk = ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : (apiLink && apiLink.startsWith('http') ? apiLink : null);
+                add('imdb', v, lnk, c, 'IMDb', 'Votes');
+                trackMaster(v, 'imdb');
+            } 
+            else if (s.includes('tmdb')) {
+                const lnk = ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
+                add('tmdb', v, lnk, c, 'TMDb', 'Votes');
+                trackMaster(v, 'tmdb');
+            }
+            else if (s.includes('trakt')) {
+                const lnk = ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#';
+                add('trakt', v, lnk, c, 'Trakt', 'Votes');
+                trackMaster(v, 'trakt');
+            }
+            else if (s.includes('letterboxd')) {
+                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
+                add('letterboxd', v, lnk, c, 'Letterboxd', 'Votes');
+                trackMaster(v, 'letterboxd');
+            }
+            else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
+                add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews');
+                trackMaster(v, 'rotten_tomatoes_critic');
+            }
+            else if (s.includes('popcorn') || s.includes('audience')) {
+                add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience', 'Ratings');
+                trackMaster(v, 'rotten_tomatoes_audience');
+            }
+            else if (s.includes('metacritic') && !s.includes('user')) {
+                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
+                add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews');
+                trackMaster(v, 'metacritic_critic');
+            }
+            else if (s.includes('metacritic') && s.includes('user')) {
+                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
+                add('metacritic_user', v, lnk, c, 'User', 'Ratings');
+                trackMaster(v, 'metacritic_user');
+            }
+            else if (s.includes('roger')) {
+                add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert', 'Reviews');
+                trackMaster(v, 'roger_ebert');
+            }
+            else if (s.includes('anilist')) {
+                add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList', 'Votes');
+                trackMaster(v, 'anilist');
+            }
+            else if (s.includes('myanimelist')) {
+                add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL', 'Votes');
+                trackMaster(v, 'myanimelist');
+            }
         });
     }
 
-    // --- 2. MASTER RATING (Second) ---
     if (masterCount > 0) {
         const average = masterSum / masterCount;
         const safeTitle = encodeURIComponent(data.title || '');
@@ -428,56 +466,6 @@ function renderRatings(container, data, pageImdbId, type) {
         const suffix = type === 'movie' ? 'film' : 'TV series';
         const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}`;
         add('master', average, wikiUrl, masterCount, 'Master Rating', 'Sources');
-    }
-
-    // --- 3. OTHER RATINGS (Following) ---
-    if (data.ratings) {
-        data.ratings.forEach(r => {
-            const s = (r.source || '').toLowerCase();
-            const v = r.value;
-            const c = r.votes || r.count;
-            const apiLink = r.url; 
-
-            if (s.includes('imdb')) {
-                const lnk = ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : (apiLink && apiLink.startsWith('http') ? apiLink : null);
-                add('imdb', v, lnk, c, 'IMDb', 'Votes');
-            } 
-            else if (s.includes('tmdb')) {
-                const lnk = ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
-                add('tmdb', v, lnk, c, 'TMDb', 'Votes');
-            }
-            else if (s.includes('trakt')) {
-                const lnk = ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#';
-                add('trakt', v, lnk, c, 'Trakt', 'Votes');
-            }
-            else if (s.includes('letterboxd')) {
-                const lnk = ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com');
-                add('letterboxd', v, lnk, c, 'Letterboxd', 'Votes');
-            }
-            else if (s === 'tomatoes' || s.includes('rotten_tomatoes')) {
-                add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews');
-            }
-            else if (s.includes('popcorn') || s.includes('audience')) {
-                add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience', 'Ratings');
-            }
-            else if (s.includes('metacritic') && !s.includes('user')) {
-                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
-                add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews');
-            }
-            else if (s.includes('metacritic') && s.includes('user')) {
-                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
-                add('metacritic_user', v, lnk, c, 'User', 'Ratings');
-            }
-            else if (s.includes('roger')) {
-                add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert', 'Reviews');
-            }
-            else if (s.includes('anilist')) {
-                add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList', 'Votes');
-            }
-            else if (s.includes('myanimelist')) {
-                add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL', 'Votes');
-            }
-        });
     }
 
     container.innerHTML = html;
@@ -578,16 +566,15 @@ function getJellyfinColor() {
 function initMenu() {
     if(document.getElementById('mdbl-panel')) return;
 
-    // Added mdbl-slider-row class for full-width layout
-    // Added resize: both; to panel
+    // Changes: 
+    // - New CSS class .mdbl-slider-row
+    // - Flexbox layout specifically for sliders
+    // - Removed compact toggle logic
     const css = `
     :root { --mdbl-right-col: 48px; }
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:500px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
-        color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; 
-        resize: both; /* Enable resizing */
-        min-width: 350px; min-height: 200px;
-    }
+        color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:6px 12px; border-bottom:1px solid rgba(255,255,255,0.08);
         display:flex; align-items:center; gap:8px; cursor:move; z-index:999; backdrop-filter:blur(8px); font-weight: bold; justify-content: space-between; }
     #mdbl-close { 
@@ -602,7 +589,7 @@ function initMenu() {
     #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
     #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); box-sizing:border-box; }
     
-    /* === FLEXBOX SLIDER ROW === */
+    /* === NEW SLIDER LAYOUT CLASS === */
     .mdbl-slider-row {
         display: flex;
         align-items: center;
@@ -719,14 +706,6 @@ function initMenu() {
     document.addEventListener('mousedown', (e) => {
         if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('.mdbl-settings-btn')) {
             panel.style.display = 'none';
-        }
-    });
-    
-    // Additional global listener just in case
-    document.addEventListener('click', (e) => {
-        if (e.target.closest('.mdbl-settings-btn')) {
-            e.preventDefault(); e.stopPropagation();
-            if(window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
         }
     });
 }
@@ -877,7 +856,82 @@ function renderMenuContent(panel) {
     panel.querySelector('#mdbl-btn-save').onclick = () => {
         saveConfig();
         const ki = panel.querySelector('#mdbl-key-mdb');
-        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
+        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}// ==UserScript==
+// @name         Jellyfin Ratings (v10.3.3 — Stable Base)
+// @namespace    https://mdblist.com
+// @version      10.3.3
+// @description  Gear -> Master -> Others. Menu fixes based on v10.1.10. Parental rating visible. Resizable Menu.
+// @match        *://*/*
+// @grant        GM_xmlhttpRequest
+// ==/UserScript==
+
+console.log('[Jellyfin Ratings] v10.3.3 loading...');
+
+/* ==========================================================================
+   1. CONFIGURATION & CONSTANTS
+========================================================================== */
+
+const NS = 'mdbl_';
+
+const DEFAULTS = {
+    sources: {
+        master: true,
+        imdb: true, tmdb: true, trakt: true, letterboxd: true,
+        rotten_tomatoes_critic: true, rotten_tomatoes_audience: true,
+        metacritic_critic: true, metacritic_user: true,
+        roger_ebert: true, anilist: true, myanimelist: true
+    },
+    display: {
+        showPercentSymbol: true,
+        colorNumbers: true,
+        colorIcons: false,
+        posX: 0,
+        posY: 0,
+        colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
+        colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
+        endsAt24h: true
+    },
+    spacing: { ratingsTopGapPx: 4 },
+    priorities: {
+        master: -1, 
+        imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
+        rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
+        roger_ebert: 7, metacritic_critic: 8, metacritic_user: 9,
+        anilist: 10, myanimelist: 11
+    }
+};
+
+const SCALE = {
+    master: 1,
+    imdb: 10, tmdb: 1, trakt: 1, letterboxd: 20, roger_ebert: 25,
+    metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
+    rotten_tomatoes_critic: 1, rotten_tomatoes_audience: 1
+};
+
+const SWATCHES = {
+    red:    ['#e53935', '#f44336', '#d32f2f', '#c62828'],
+    orange: ['#fb8c00', '#f39c12', '#ffa726', '#ef6c00'],
+    yg:     ['#9ccc65', '#c0ca33', '#aeea00', '#cddc39'],
+    mg:     ['#43a047', '#66bb6a', '#388e3c', '#81c784']
+};
+
+const PALETTE_NAMES = {
+    red:    ['Alert Red', 'Tomato', 'Crimson', 'Deep Red'],
+    orange: ['Amber', 'Signal Orange', 'Apricot', 'Burnt Orange'],
+    yg:     ['Lime Leaf', 'Citrus', 'Chartreuse', 'Soft Lime'],
+    mg:     ['Emerald', 'Leaf Green', 'Forest', 'Mint']
+};
+
+const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
+const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
+
+const LOGO = {
+    master: `${ICON_BASE}/master.png`,
+    imdb: `${ICON_BASE}/IMDb.png`,
+    tmdb: `${ICON_BASE}/TMDB.png`,
+    trakt: `${ICON_BASE}/Trakt.png`,
+    letterboxd: `${ICON_BASE}/letterboxd.png`,
+));
         location.reload();
     };
     panel.querySelector('#mdbl-btn-reset').onclick = () => {
