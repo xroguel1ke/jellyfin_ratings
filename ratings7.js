@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.7 — Full Width Sliders)
+// @name         Jellyfin Ratings (v10.1.8 — Compact & Wide Sliders)
 // @namespace    https://mdblist.com
-// @version      10.1.7
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Sliders now stretch to fill the full menu width.
+// @version      10.1.8
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Compact Mode only. Wide Flexbox Sliders.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.7 loading...');
+console.log('[Jellyfin Ratings] v10.1.8 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -31,7 +31,6 @@ const DEFAULTS = {
         posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
-        compactLevel: 0,
         endsAt24h: true
     },
     spacing: { ratingsTopGapPx: 4 },
@@ -103,6 +102,13 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
+        
+        // Enforce Limits on Load
+        if(p.display.posX > 500) p.display.posX = 500;
+        if(p.display.posX < -500) p.display.posX = -500;
+        if(p.display.posY > 400) p.display.posY = 400;
+        if(p.display.posY < -400) p.display.posY = -400;
+
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -537,13 +543,10 @@ function getJellyfinColor() {
 function initMenu() {
     if(document.getElementById('mdbl-panel')) return;
 
-    // Changes: 
-    // 1. Panel width 600px
-    // 2. Removed --mdbl-right-col-wide variable dependency for layout (switched to flex)
-    // 3. Sliders set to flex: 1 to fill available space
+    // Changes: Fixed Flexbox layout for slider rows to enable stretching
     const css = `
     :root { --mdbl-right-col: 48px; }
-    #mdbl-panel { position:fixed; right:16px; bottom:70px; width:600px; max-height:90vh; overflow:auto; border-radius:14px;
+    #mdbl-panel { position:fixed; right:16px; bottom:70px; width:500px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
         color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:6px 12px; border-bottom:1px solid rgba(255,255,255,0.08);
@@ -554,13 +557,13 @@ function initMenu() {
         padding: 0; border-radius: 6px; 
     }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
-    #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+    #mdbl-panel .mdbl-section { padding:2px 12px; gap:2px; display:flex; flex-direction:column; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     
-    #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:10px; padding:8px 10px; border-radius:12px; }
-    #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); min-height: 48px; box-sizing:border-box; }
+    #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
+    #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); box-sizing:border-box; }
     
-    /* === SLIDER ROW LAYOUT FIX === */
+    /* === SLIDER ROW LAYOUT FIX (FLEXBOX) === */
     #mdbl-panel .mdbl-row.wide { display: flex !important; justify-content: space-between; gap: 15px; }
     #mdbl-panel .mdbl-row.wide > span { white-space: nowrap; width: 110px; flex-shrink: 0; }
     #mdbl-panel .mdbl-row.wide .grid-right { flex: 1; display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
@@ -573,20 +576,20 @@ function initMenu() {
     #mdbl-panel input[type="range"] { 
         flex: 1; /* Stretch slider */
         margin: 0; cursor: pointer; accent-color: var(--mdbl-theme); 
-        width: auto;
+        width: 100%;
     }
     
     #mdbl-panel input[type="text"] { width:100%; padding:10px 0; border:0; background:transparent; color:#eaeaea; font-size:14px; outline:none; }
     
     #mdbl-panel select, #mdbl-panel input.mdbl-pos-input, #mdbl-panel input.mdbl-num-input {
         padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea;
-        height:32px; line-height: 32px; box-sizing:border-box; display:inline-block; color-scheme: dark;
+        height:28px; line-height: 28px; font-size: 12px; box-sizing:border-box; display:inline-block; color-scheme: dark;
     }
     #mdbl-panel .mdbl-select { width:140px; justify-self:end; }
     #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
     #mdbl-panel input.mdbl-num-input { width: 60px; text-align: center; }
 
-    #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.08); }
+    #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:6px 10px; border-top:1px solid rgba(255,255,255,0.08); }
     #mdbl-panel button { padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
     
     /* Force Theme Color */
@@ -599,7 +602,7 @@ function initMenu() {
     #mdbl-sources { display:flex; flex-direction:column; gap:8px; }
     .mdbl-source { background:#0f1115; border:1px solid rgba(255,255,255,0.1); cursor: grab; }
     .mdbl-src-left { display:flex; align-items:center; gap:10px; }
-    .mdbl-src-left img { height:18px; width:auto; }
+    .mdbl-src-left img { height:16px; width:auto; }
     .mdbl-src-left .name { font-size:13px; }
     .mdbl-drag-handle { justify-self:start; opacity:0.6; cursor:grab; }
     #mdbl-key-box { background:#0f1115; border:1px solid rgba(255,255,255,0.1); padding:10px; border-radius:12px; }
@@ -610,23 +613,12 @@ function initMenu() {
     .mdbl-grid label { white-space: nowrap; }
     .sw { display:inline-block; width:18px; height:18px; border-radius:4px; border:1px solid rgba(255,255,255,0.25); }
     
-    #mdbl-panel hr { border:0; border-top:1px solid rgba(255,255,255,0.08); margin:10px 0; }
+    #mdbl-panel hr { border:0; border-top:1px solid rgba(255,255,255,0.08); margin:4px 0; }
     #mdbl-panel .mdbl-actions { display:flex; align-items:center; gap:8px; }
     #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
-    #mdbl-panel .mdbl-actions .mdbl-compact { display:inline-flex; align-items:center; gap:6px; opacity:0.95; }
-    
-    #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; width:500px; }
-    #mdbl-panel[data-compact="1"] header { padding:6px 12px; }
-    #mdbl-panel[data-compact="1"] .mdbl-section { padding:2px 12px; gap:2px; }
-    #mdbl-panel[data-compact="1"] .mdbl-row, #mdbl-panel[data-compact="1"] .mdbl-source { gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
-    #mdbl-panel[data-compact="1"] .mdbl-actions { padding:6px 10px; }
-    #mdbl-panel[data-compact="1"] .mdbl-src-left img { height:16px; }
-    #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input.mdbl-pos-input, #mdbl-panel[data-compact="1"] input.mdbl-num-input { height: 28px; font-size: 12px; line-height: 28px; }
-    #mdbl-panel[data-compact="1"] .mdbl-select { width: 140px; }
-    #mdbl-panel[data-compact="1"] hr { margin: 4px 0; }
 
     @media (max-width: 600px) {
-        #mdbl-panel, #mdbl-panel[data-compact="1"] {
+        #mdbl-panel {
             width: 96% !important; left: 2% !important; right: 2% !important; bottom: 10px !important; top: auto !important;
             transform: none !important; max-height: 80vh;
             --mdbl-right-col: 40px; 
@@ -673,14 +665,12 @@ function initMenu() {
             panel.style.display = 'none';
         }
     });
-    
-    if(loadConfig().display.compactLevel) panel.setAttribute('data-compact', '1');
 }
 
 initMenu();
 
 function renderMenuContent(panel) {
-    const row = (label, input, wide) => `<div class="mdbl-row ${wide?'wide':''}"><span>${label}</span>${input}</div>`;
+    const row = (label, input, wide) => `<div class="mdbl-row ${wide?'wide':''}"><span>${label}</span>${wide ? `<div class="grid-right">${input}</div>` : input}</div>`;
     
     let html = `
     <header>
@@ -693,7 +683,7 @@ function renderMenuContent(panel) {
     <div class="mdbl-section">
        <div class="mdbl-subtle">Sources (drag to reorder)</div>
        <div id="mdbl-sources"></div>
-       <hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0">
+       <hr>
     </div>
     <div class="mdbl-section" id="mdbl-sec-display">
         <div class="mdbl-subtle">Display</div>
@@ -712,12 +702,12 @@ function renderMenuContent(panel) {
         <div class="mdbl-row wide">
             <span>Position Y (px)</span>
             <div class="grid-right">
-            <input type="range" id="d_y_rng" min="-300" max="300" value="${CFG.display.posY}">
+            <input type="range" id="d_y_rng" min="-400" max="400" value="${CFG.display.posY}">
             <input type="number" id="d_y_num" value="${CFG.display.posY}" class="mdbl-pos-input">
             </div>
         </div>
 
-        <hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0">
+        <hr>
         
         <div class="mdbl-subtle">Color bands &amp; palette</div>
         <div class="mdbl-grid">
@@ -736,11 +726,6 @@ function renderMenuContent(panel) {
     <div class="mdbl-actions" style="padding-bottom:16px">
       <button id="mdbl-btn-reset">Reset</button>
       <button id="mdbl-btn-save" class="primary">Save & Apply</button>
-      <div class="mdbl-grow"></div>
-      <label class="mdbl-compact" for="mdbl-compact-toggle">
-        <span>Compact</span>
-        <input type="checkbox" id="mdbl-compact-toggle" ${CFG.display.compactLevel?'checked':''}>
-      </label>
     </div>
     `;
     
@@ -756,7 +741,7 @@ function renderMenuContent(panel) {
          div.innerHTML = `
             <div class="mdbl-src-left">
                 <span class="mdbl-drag-handle">⋮⋮</span>
-                <img src="${LOGO[k]||''}" style="height:18px">
+                <img src="${LOGO[k]||''}" style="height:16px">
                 <span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span>
             </div>
             <input type="checkbox" class="src-check" ${CFG.sources[k]?'checked':''}>
@@ -807,10 +792,6 @@ function renderMenuContent(panel) {
         });
     });
 
-    panel.querySelector('#mdbl-compact-toggle').addEventListener('change', (e) => {
-        panel.setAttribute('data-compact', e.target.checked ? '1':'0');
-    });
-
     let dragSrc = null;
     panel.querySelectorAll('.mdbl-src-row').forEach(row => {
         row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; });
@@ -831,7 +812,6 @@ function renderMenuContent(panel) {
     });
 
     panel.querySelector('#mdbl-btn-save').onclick = () => {
-        CFG.display.compactLevel = panel.querySelector('#mdbl-compact-toggle').checked ? 1 : 0;
         saveConfig();
         const ki = panel.querySelector('#mdbl-key-mdb');
         if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
