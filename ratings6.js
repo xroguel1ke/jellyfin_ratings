@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.17 — Stable SPA)
+// @name         Jellyfin Ratings (v10.1.18 — State Loop)
 // @namespace    https://mdblist.com
-// @version      10.1.17
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Debounced Observer for stability.
+// @version      10.1.18
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. State-Loop Engine.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.17 loading...');
+console.log('[Jellyfin Ratings] v10.1.18 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -496,34 +496,20 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// === STABLE SPA DETECTOR (No loops) ===
-
-// 1. Debounced Observer (Throttles DOM checks to avoid freezing)
-let debounceTimer = null;
-const observer = new MutationObserver(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => scan(), 200); // 200ms wait before scanning
-});
-observer.observe(document.body, { childList: true, subtree: true });
-
-// 2. Navigation Hook (Listen to history changes directly)
-const originalPushState = history.pushState;
-history.pushState = function() {
-    originalPushState.apply(this, arguments);
-    setTimeout(scan, 200); // Trigger scan on nav
-};
-window.addEventListener('popstate', () => setTimeout(scan, 200));
-
+// === STATE LOOP ENGINE (NO EVENTS, JUST CHECKS) ===
 
 function scan() {
+    // 1. Always update Time
     updateEndsAt();
 
+    // 2. Identify current IMDB ID on page
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
     if (imdbLink) {
         const m = imdbLink.href.match(/tt\d+/);
         if (m) currentImdbId = m[0];
     }
 
+    // 3. Loop through TMDB links to find the active item
     [...document.querySelectorAll('a[href*="themoviedb.org/"]')].forEach(a => {
         const m = a.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
@@ -532,9 +518,11 @@ function scan() {
             
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper && document.body.contains(wrapper)) {
+                // Check if container exists
                 const existing = wrapper.querySelector('.mdblist-rating-container');
                 
                 if (!existing) {
+                    // Create if missing
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
@@ -543,6 +531,7 @@ function scan() {
                     fetchRatings(div, id, type);
                 } 
                 else if (existing.dataset.tmdbId !== id) {
+                    // Replace if ID mismatch (navigated to new page)
                     existing.remove();
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
@@ -555,6 +544,9 @@ function scan() {
         }
     });
 }
+
+// The Loop: Runs every 500ms forever. Safe and reliable.
+setInterval(scan, 500);
 
 
 /* ==========================================================================
