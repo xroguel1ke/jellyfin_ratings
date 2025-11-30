@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.52 — Marker & Dynamic)
+// @name         Jellyfin Ratings (v10.1.53 — TMDB Only)
 // @namespace    https://mdblist.com
-// @version      10.1.52
-// @description  Master Rating links. Gear icon first. Dynamic Icons (Rotten/Fresh). Marker-based scanning for perfect loading. Ratings placement adjusted.
+// @version      10.1.53
+// @description  Master Rating links. Gear icon first. Scans ONLY for TMDB links to avoid API 405 errors. Fixes Roger Ebert & AniList links.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.52 loading...');
+console.log('[Jellyfin Ratings] v10.1.53 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -23,7 +23,7 @@ const DEFAULTS = {
     },
     display: {
         showPercentSymbol: true, colorNumbers: true, colorIcons: false,
-        dynamicIcons: true, // New Toggle
+        dynamicIcons: true,
         posX: 0, posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
@@ -61,7 +61,6 @@ const PALETTE_NAMES = {
 const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 
-// Standard Logos
 const LOGO = {
     master: `${ICON_BASE}/master.png`, imdb: `${ICON_BASE}/IMDb.png`, tmdb: `${ICON_BASE}/TMDB.png`,
     trakt: `${ICON_BASE}/Trakt.png`, letterboxd: `${ICON_BASE}/letterboxd.png`, anilist: `${ICON_BASE}/anilist.png`,
@@ -71,7 +70,7 @@ const LOGO = {
     metacritic_critic: `${ICON_BASE}/Metacritic.png`, metacritic_user: `${ICON_BASE}/mus2.png`
 };
 
-// Dynamic Logos (Rotten/Fresh) - Names match reference script
+// Dynamic Logos
 const DYNAMIC_LOGO = {
     tomatoes_rotten: `${ICON_BASE}/Rotten_Tomatoes_rotten.png`,
     audience_rotten: `${ICON_BASE}/Rotten_Tomatoes_negative_audience.png`
@@ -85,7 +84,6 @@ const LABEL = {
 };
 
 let CFG = loadConfig();
-let currentImdbId = null;
 
 // GET KEY SAFELY
 const INJ_KEYS = (window.MDBL_KEYS || {});
@@ -97,7 +95,6 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        // Ensure new defaults exist
         if(typeof p.display.dynamicIcons === 'undefined') p.display.dynamicIcons = DEFAULTS.display.dynamicIcons;
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
@@ -139,7 +136,6 @@ function updateGlobalStyles() {
     let rules = `
         .mdblist-rating-container {
             display: inline-flex; flex-wrap: wrap; align-items: center;
-            /* Positioned relative to flow, no longer absolute forced right */
             margin-left: 14px;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
             z-index: 2147483647; position: relative; 
@@ -173,11 +169,11 @@ function updateGlobalStyles() {
 
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
         
-        /* Ensure Custom Ends At fits inline */
+        /* Custom Ends At Placement */
         #customEndsAt { 
             font-size: inherit; opacity: 0.9; cursor: default; 
             margin-left: 14px; display: inline-block; padding: 2px 4px;
-            margin-right: 0px; /* Reset */
+            margin-right: 0px;
         }
         
         .mediaInfoOfficialRating { display: inline-flex !important; }
@@ -227,7 +223,6 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-// v10.1.12 Logic for URL fixing
 function fixUrl(url, domain) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -312,7 +307,7 @@ function updateEndsAt() {
             span.id = 'customEndsAt';
             // Insert BEFORE ratings container to maintain order: Official -> Ends At -> Ratings
             const rc = primary.querySelector('.mdblist-rating-container');
-            if (rc) primary.insertBefore(span, rc); // Insert before ratings
+            if (rc) primary.insertBefore(span, rc); 
             else primary.appendChild(span);
         }
         span.textContent = `Ends at ${timeStr}`;
@@ -323,20 +318,18 @@ function updateEndsAt() {
     }
 }
 
-// === LINK BUILDER (Mixed v12 logic for Ebert, Smart for others) ===
+// === LINK BUILDER ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
+    const safeTitle = encodeURIComponent(title || '');
+    const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
     
     if (sLink.startsWith('http') && key !== 'metacritic_user' && key !== 'roger_ebert') return sLink;
 
     switch(key) {
         case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': 
-            const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
-            return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        case 'trakt': 
-            const tType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
-            return ids.trakt ? `https://trakt.tv/${tType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
+        case 'trakt': return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
         case 'letterboxd': 
             if (sLink.includes('/film/') || sLink.includes('/slug/')) {
                 return `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}`;
@@ -347,8 +340,7 @@ function generateLink(key, ids, apiLink, type, title) {
         case 'metacritic_user': 
             if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) return `https://www.metacritic.com${sLink}`;
             const slug = localSlug(title);
-            const mType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
-            return slug ? `https://www.metacritic.com/${mType}/${slug}` : '#';
+            return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
 
         case 'rotten_tomatoes_critic':
         case 'rotten_tomatoes_audience': 
@@ -359,20 +351,27 @@ function generateLink(key, ids, apiLink, type, title) {
         case 'anilist': 
             if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
             if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
-            // Fallback to search
-            return `https://anilist.co/search/anime?search=${encodeURIComponent(title||'')}`;
+            // Fallback Search
+            return `https://anilist.co/search/anime?search=${safeTitle}`;
             
         case 'myanimelist': 
             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
-            return `https://myanimelist.net/anime.php?q=${encodeURIComponent(title||'')}`;
+            // Fallback Search
+            return `https://myanimelist.net/anime.php?q=${safeTitle}`;
             
         case 'roger_ebert':
-             // v10.1.12 Logic requested
-             return fixUrl(sLink, 'rogerebert.com');
+             // Force /reviews/ logic + fallback
+             if (sLink && sLink.length > 2 && sLink !== '#') {
+                 if (sLink.startsWith('http')) return sLink;
+                 let path = sLink.startsWith('/') ? sLink : `/${sLink}`;
+                 if (!path.includes('/reviews/')) path = `/reviews${path}`;
+                 return `https://www.rogerebert.com${path}`;
+             }
+             // Search fallback if empty
+             return `https://www.rogerebert.com/search?q=${safeTitle}`;
 
-        default:
-            return '#';
+        default: return '#';
     }
 }
 
@@ -464,6 +463,7 @@ function renderRatings(container, data, pageImdbId, type) {
             else if (s.includes('tmdb')) { add('tmdb', v, apiLink, c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
             else if (s.includes('trakt')) { add('trakt', v, apiLink, c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
             else if (s.includes('letterboxd')) { add('letterboxd', v, apiLink, c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
+            
             else if (s.includes('tomatoes') || s.includes('rotten') || s.includes('popcorn')) {
                 if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, apiLink, c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
                 else { add('rotten_tomatoes_critic', v, apiLink, c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
@@ -496,9 +496,10 @@ function renderRatings(container, data, pageImdbId, type) {
     }
 }
 
-function fetchRatings(container, id, type, apiMode) {
+function fetchRatings(container, id, type) {
     if (container.dataset.fetching === 'true') return;
-    const apiUrl = (apiMode === 'imdb') ? `https://api.mdblist.com/imdb/${id}?apikey=${API_KEY}` : `https://api.mdblist.com/tmdb/${type}/${id}?apikey=${API_KEY}`;
+    // FIXED: Always use TMDB endpoint (no 405 error)
+    const apiUrl = `https://api.mdblist.com/tmdb/${type}/${id}?apikey=${API_KEY}`;
     const cacheKey = `${NS}c_${id}`;
     
     try {
@@ -510,7 +511,7 @@ function fetchRatings(container, id, type, apiMode) {
     } catch(e) {}
 
     container.dataset.fetching = 'true';
-    updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
+    updateStatus(container, `Fetching TMDB...`);
     
     GM_xmlhttpRequest({
         method: 'GET', url: apiUrl,
@@ -538,7 +539,7 @@ function fetchRatings(container, id, type, apiMode) {
     });
 }
 
-// === MARKER-BASED SCANNER (From Ref Script) ===
+// === MARKER-BASED SCANNER ===
 function scan() {
     updateEndsAt();
     
@@ -550,22 +551,12 @@ function scan() {
         if (m) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
-            injectContainer(id, type, 'tmdb');
-        }
-    });
-    
-    // Scan IMDb links (Fallback)
-    document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])').forEach(link => {
-        link.dataset.mdblProcessed = "true";
-        
-        const m = link.href.match(/tt\d+/);
-        if (m) {
-            injectContainer(m[0], 'movie', 'imdb');
+            injectContainer(id, type);
         }
     });
 }
 
-function injectContainer(id, type, apiMode) {
+function injectContainer(id, type) {
     // Find visible wrapper
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
@@ -576,7 +567,6 @@ function injectContainer(id, type, apiMode) {
 
     // Placement Strategy: After Official Rating
     let target = wrapper.querySelector('.mediaInfoOfficialRating');
-    // If no official rating, try to place at end of wrapper
     
     let container = wrapper.querySelector('.mdblist-rating-container');
     // If container exists but ID changed (or recycled), wipe it
@@ -598,7 +588,7 @@ function injectContainer(id, type, apiMode) {
         }
         
         renderGearIcon(container, 'Loading...');
-        fetchRatings(container, id, type, apiMode);
+        fetchRatings(container, id, type);
     }
 }
 
