@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.39 — Final Link Fix)
+// @name         Jellyfin Ratings (v10.1.40 — Universal Link Fix)
 // @namespace    https://mdblist.com
-// @version      10.1.39
-// @description  Master Rating links to Wikipedia. Gear icon first. Hides default ratings. Manually builds IMDb/TMDB links. Aggressive state reset on navigation.
+// @version      10.1.40
+// @description  Master Rating links to Wikipedia. Gear icon first. Hides default ratings. Generates valid links for ALL sources (RT, MC, Letterboxd, etc.). Stable loading.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.39 loading...');
+console.log('[Jellyfin Ratings] v10.1.40 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -221,10 +221,8 @@ updateGlobalStyles();
 
 function fixUrl(url, domain) {
     if (!url) return null;
-    // FIX: Ensure url is a string before checking
-    const strUrl = String(url);
-    if (strUrl.startsWith('http')) return strUrl;
-    const clean = strUrl.startsWith('/') ? strUrl.substring(1) : strUrl;
+    if (url.startsWith('http')) return url;
+    const clean = url.startsWith('/') ? url.substring(1) : url;
     return `https://${domain}/${clean}`;
 }
 
@@ -315,19 +313,47 @@ function updateEndsAt() {
     }
 }
 
-// FIX: Manual Link Generation to bypass API garbage
+// === COMPREHENSIVE LINK BUILDER ===
 function generateLink(key, ids, apiLink, type) {
+    const sApiLink = String(apiLink || '');
+    
+    // Helper for absolute URLs
+    if (sApiLink.startsWith('http')) return sApiLink;
+
     switch(key) {
-        case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
-        case 'trakt': return ids.trakt ? `https://trakt.tv/${type}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'imdb': 
+            return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
+        case 'tmdb': 
+            return ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#';
+        case 'trakt': 
+            return ids.trakt ? `https://trakt.tv/${type}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
         case 'letterboxd': 
-            // Letterboxd is strictly movie usually via imdb id
+            // Letterboxd API often sends "/film/slug" or relative
+            if (sApiLink.includes('/film/') || sApiLink.includes('/slug/')) {
+                return `https://letterboxd.com${sApiLink.startsWith('/') ? '' : '/'}${sApiLink}`;
+            }
             return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+        case 'rotten_tomatoes_critic':
+        case 'rotten_tomatoes_audience': 
+            if (sApiLink.startsWith('/')) return `https://www.rottentomatoes.com${sApiLink}`;
+            if (sApiLink.length > 2) return `https://www.rottentomatoes.com/m/${sApiLink}`;
+            return '#';
+        case 'metacritic_critic':
+        case 'metacritic_user': 
+            // Metacritic often sends "/movie/slug"
+            if (sApiLink.startsWith('/')) return `https://www.metacritic.com${sApiLink}`;
+            return '#';
+        case 'roger_ebert':
+            if (sApiLink.startsWith('/')) return `https://www.rogerebert.com${sApiLink}`;
+            return '#';
+        case 'anilist': 
+            if (/^\d+$/.test(sApiLink)) return `https://anilist.co/anime/${sApiLink}`;
+            return 'https://anilist.co/';
+        case 'myanimelist': 
+            if (/^\d+$/.test(sApiLink)) return `https://myanimelist.net/anime/${sApiLink}`;
+            return 'https://myanimelist.net/';
         default:
-            // Fallback to API link but check if it's a string first
-            const sLink = String(apiLink || '');
-            return sLink.startsWith('http') ? sLink : '#';
+            return '#';
     }
 }
 
@@ -388,14 +414,13 @@ function renderRatings(container, data, pageImdbId, type) {
 
     let html = '';
     
-    // Construct IDs safely
     const ids = { 
         imdb: data.ids?.imdb || data.imdbid || pageImdbId, 
-        tmdb: data.ids?.tmdb || data.id || data.tmdbid || container.dataset.tmdbId, 
+        tmdb: data.ids?.tmdb || data.id || data.tmdbid || data.tmdb_id, 
         trakt: data.ids?.trakt || data.traktid || data.trakt_id, 
         slug: data.ids?.slug || data.slug 
     };
-    
+
     // Link Generator Wrapper
     const add = (k, v, apiLink, c, tit, kind) => {
         const safeLink = generateLink(k, ids, apiLink, type);
@@ -431,17 +456,16 @@ function renderRatings(container, data, pageImdbId, type) {
         if (masterCount > 0) {
             const avg = masterSum / masterCount;
             const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${encodeURIComponent(data.title || '')}+${(data.year || '')}+${type === 'movie' ? 'film' : 'TV series'}`;
-            html += createRatingHtml('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
+            add('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
         }
         
         const contentDiv = document.createElement('span');
         contentDiv.innerHTML = html;
         while (contentDiv.firstChild) container.appendChild(contentDiv.firstChild);
         
-        // Remove status text if we have ratings
         const st = container.querySelector('.mdbl-status-text');
         if(st) st.remove();
-
+        
         refreshDomElements();
     } else {
         updateStatus(container, 'MDB: 0 Ratings', '#e53935');
@@ -462,7 +486,7 @@ function fetchRatings(container, id, type, apiMode) {
     } catch(e) {}
 
     container.dataset.fetching = 'true';
-    updateStatus(container, 'Fetching...');
+    updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
     
     GM_xmlhttpRequest({
         method: 'GET', url: apiUrl,
@@ -515,7 +539,6 @@ function scan() {
         renderGearIcon(container, 'Scanning...');
         container.dataset.retries = 0; 
     } else if (container.dataset.jellyfinId !== currentJellyfinId) {
-        // ID changed? Nuke it immediately.
         container.innerHTML = '';
         renderGearIcon(container, 'Scanning...');
         container.dataset.jellyfinId = currentJellyfinId;
