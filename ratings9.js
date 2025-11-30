@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.33 — Visual Debug)
+// @name         Jellyfin Ratings (v10.1.34 — Robust UI)
 // @namespace    https://mdblist.com
-// @version      10.1.33
-// @description  Master Rating links to Wikipedia. Gear icon first. Restored v10.1.23 ID scanner. Explicitly shows errors/empty data.
+// @version      10.1.34
+// @description  Master Rating links to Wikipedia. Gear icon first. Fixes disappearing text bug. Logs API response to console.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.33 loading...');
+console.log('[Jellyfin Ratings] v10.1.34 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -163,7 +163,7 @@ function updateGlobalStyles() {
         .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
         
         .mdbl-status-text {
-            font-size: 11px; opacity: 0.9; margin-left: 5px; color: #ffeb3b;
+            font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b;
             white-space: nowrap; font-family: monospace; font-weight: bold;
         }
 
@@ -323,34 +323,35 @@ function createRatingHtml(key, val, link, count, title, kind) {
 }
 
 function renderGearIcon(container, statusText = '') {
-    if (container.querySelector('.mdbl-settings-btn')) {
-        const st = container.querySelector('.mdbl-status-text');
-        if(st && statusText) {
-            st.textContent = statusText;
-            st.style.color = '#ffeb3b';
-        }
-        return;
+    // Ensure we don't duplicate button
+    if (!container.querySelector('.mdbl-settings-btn')) {
+        const btn = document.createElement('div');
+        btn.className = 'mdbl-rating-item mdbl-settings-btn';
+        btn.title = 'Settings';
+        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>';
+        btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
+        container.appendChild(btn);
     }
     
-    const btn = document.createElement('div');
-    btn.className = 'mdbl-rating-item mdbl-settings-btn';
-    btn.title = 'Settings';
-    btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>';
-    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
-
-    const status = document.createElement('span');
-    status.className = 'mdbl-status-text';
-    status.textContent = statusText || '...';
-
-    container.appendChild(btn);
-    container.appendChild(status);
+    // Ensure we don't duplicate status
+    let st = container.querySelector('.mdbl-status-text');
+    if (!st) {
+        st = document.createElement('span');
+        st.className = 'mdbl-status-text';
+        container.appendChild(st);
+    }
+    st.textContent = statusText;
+    
     updateGlobalStyles();
 }
 
 function updateStatus(container, text, color = '#ffeb3b') {
+    // FIX: Recreate button AND span if innerHTML was wiped
     if (!container.querySelector('.mdbl-settings-btn')) {
-        renderGearIcon(container, text);
+        renderGearIcon(container, text); // Recreates structure
     }
+    
+    // Safety check again
     const st = container.querySelector('.mdbl-status-text');
     if(st) { 
         st.textContent = text; 
@@ -359,61 +360,61 @@ function updateStatus(container, text, color = '#ffeb3b') {
 }
 
 function renderRatings(container, data, pageImdbId, type) {
-    const btn = container.querySelector('.mdbl-settings-btn');
-    // DO NOT CLEAR CONTAINER IF WE WANT TO KEEP STATUS UNTIL RATINGS APPEAR
-    // BUT we must clear old ratings
-    container.querySelectorAll('.mdbl-rating-item:not(.mdbl-settings-btn)').forEach(e => e.remove());
-    container.querySelectorAll('.mdbl-status-text').forEach(e => e.remove()); // Remove "Fetching..." text
+    console.log('[MDBList] API Response:', data); // DEBUG
 
-    // Re-ensure button exists
-    if(!container.querySelector('.mdbl-settings-btn')) {
-        renderGearIcon(container, '');
-    }
+    // 1. Wipe content but ensure structure
+    container.innerHTML = ''; 
+    // Recreate base structure
+    renderGearIcon(container, '');
 
+    // 2. Add Ratings
     let html = '';
     const add = (k, v, lnk, cnt, tit, kind) => html += createRatingHtml(k, v, lnk, cnt, tit, kind);
     const ids = { imdb: data.imdbid || data.imdb_id || pageImdbId, tmdb: data.id || data.tmdbid || data.tmdb_id, trakt: data.traktid || data.trakt_id, slug: data.slug || data.ids?.slug };
     const fallbackSlug = localSlug(data.title || '');
+    const metaType = type === 'show' ? 'tv' : 'movie';
     let masterSum = 0, masterCount = 0;
     const trackMaster = (val, scaleKey) => { if (val !== null && !isNaN(parseFloat(val))) { masterSum += parseFloat(val) * (SCALE[scaleKey] || 1); masterCount++; } };
 
-    let hasRatings = false;
     if (data.ratings && data.ratings.length > 0) {
         data.ratings.forEach(r => {
             const s = (r.source || '').toLowerCase();
             const v = r.value, c = r.votes || r.count, apiLink = r.url;
-            if (s.includes('imdb')) { add('imdb', v, ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : apiLink, c, 'IMDb', 'Votes'); trackMaster(v, 'imdb'); hasRatings = true; }
-            else if (s.includes('tmdb')) { add('tmdb', v, ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#', c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); hasRatings = true; }
-            else if (s.includes('trakt')) { add('trakt', v, ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#', c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); hasRatings = true; }
-            else if (s.includes('letterboxd')) { add('letterboxd', v, ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com'), c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); hasRatings = true; }
+            if (s.includes('imdb')) { add('imdb', v, ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : apiLink, c, 'IMDb', 'Votes'); trackMaster(v, 'imdb'); }
+            else if (s.includes('tmdb')) { add('tmdb', v, ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#', c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
+            else if (s.includes('trakt')) { add('trakt', v, ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#', c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
+            else if (s.includes('letterboxd')) { add('letterboxd', v, ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com'), c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
             else if (s.includes('tomatoes') || s.includes('rotten')) {
-                if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); hasRatings = true; }
-                else { add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); hasRatings = true; }
+                if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
+                else { add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
             }
             else if (s.includes('metacritic')) {
-                const lnk = fallbackSlug ? `https://www.metacritic.com/${type === 'show' ? 'tv' : 'movie'}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
-                if(s.includes('user')) { add('metacritic_user', v, lnk, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); hasRatings = true; }
-                else { add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); hasRatings = true; }
+                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
+                if(s.includes('user')) { add('metacritic_user', v, lnk, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
+                else { add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
             }
-            else if (s.includes('roger')) { add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); hasRatings = true; }
-            else if (s.includes('anilist')) { add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); hasRatings = true; }
-            else if (s.includes('myanimelist')) { add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL', 'Votes'); trackMaster(v, 'myanimelist'); hasRatings = true; }
+            else if (s.includes('roger')) { add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); }
+            else if (s.includes('anilist')) { add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); }
+            else if (s.includes('myanimelist')) { add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL', 'Votes'); trackMaster(v, 'myanimelist'); }
         });
-    }
-
-    if (masterCount > 0) {
-        const avg = masterSum / masterCount;
-        const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${encodeURIComponent(data.title || '')}+${(data.year || '')}+${type === 'movie' ? 'film' : 'TV series'}`;
-        add('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
-    }
-
-    if (html) {
+        
+        if (masterCount > 0) {
+            const avg = masterSum / masterCount;
+            const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${encodeURIComponent(data.title || '')}+${(data.year || '')}+${type === 'movie' ? 'film' : 'TV series'}`;
+            add('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
+        }
+        
         const contentDiv = document.createElement('span');
         contentDiv.innerHTML = html;
         while (contentDiv.firstChild) container.appendChild(contentDiv.firstChild);
+        
+        // Remove status text if we have ratings
+        const st = container.querySelector('.mdbl-status-text');
+        if(st) st.remove();
+
         refreshDomElements();
     } else {
-        // EXPLICITLY SHOW NO DATA
+        // EXPLICITLY SHOW STATUS if empty
         updateStatus(container, 'MDB: 0 Ratings', '#e53935');
     }
 }
@@ -423,18 +424,16 @@ function fetchRatings(container, id, type, apiMode) {
     const apiUrl = (apiMode === 'imdb') ? `https://api.mdblist.com/imdb/${id}?apikey=${API_KEY}` : `https://api.mdblist.com/tmdb/${type}/${id}?apikey=${API_KEY}`;
     const cacheKey = `${NS}c_${id}`;
     
-    // DISABLE CACHE TEMPORARILY TO FORCE DEBUGGING
-    /* try {
+    try {
         const cached = localStorage.getItem(cacheKey);
         if (cached) {
             const c = JSON.parse(cached);
             if (Date.now() - c.ts < CACHE_DURATION_API) { renderRatings(container, c.data, currentImdbId, type); return; }
         }
     } catch(e) {}
-    */
 
     container.dataset.fetching = 'true';
-    updateStatus(container, `Fetching ${apiMode}...`);
+    updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
     
     GM_xmlhttpRequest({
         method: 'GET', url: apiUrl,
@@ -442,22 +441,22 @@ function fetchRatings(container, id, type, apiMode) {
             container.dataset.fetching = 'false';
             if (r.status !== 200) { 
                 console.error('[MDBList] API Error:', r.status);
-                updateStatus(container, `MDB Error: ${r.status}`, '#e53935');
+                updateStatus(container, `API ${r.status}`, '#e53935');
                 return;
             }
             try {
                 const d = JSON.parse(r.responseText);
-                // localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
+                localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
                 renderRatings(container, d, currentImdbId, type);
             } catch(e) { 
                 console.error('[MDBList] Parse Error', e); 
-                updateStatus(container, 'JSON Error', '#e53935');
+                updateStatus(container, 'Parse Err', '#e53935');
             }
         },
         onerror: e => { 
             container.dataset.fetching = 'false'; 
             console.error('[MDBList] Net Error', e); 
-            updateStatus(container, 'Net Error', '#e53935');
+            updateStatus(container, 'Net Err', '#e53935');
         }
     });
 }
@@ -499,10 +498,22 @@ function scan() {
 
     if (container.dataset.fetched === 'true') return;
 
-    // v10.1.23 LOGIC REPLICA
+    // Retry Logic
+    let retries = parseInt(container.dataset.retries || '0');
+    // Keep trying for 50 cycles (25 seconds) to catch delayed Jellyfin rendering
+    if (retries > 50) {
+        const st = container.querySelector('.mdbl-status-text');
+        // Only show "No ID" if it hasn't been fetched yet
+        if (st && container.dataset.fetched !== 'true' && !st.textContent.includes('0 Ratings')) {
+             updateStatus(container, 'No ID found', '#e53935');
+        }
+        return;
+    }
+    container.dataset.retries = retries + 1;
+
     let type = 'movie', id = null, mode = 'tmdb';
     
-    // 1. TMDB
+    // v10.1.23 STYLE DOM SCAN (All links)
     for (let i = 0; i < document.links.length; i++) {
         const href = document.links[i].href;
         if (href.includes('themoviedb.org')) {
@@ -510,7 +521,7 @@ function scan() {
             if (m) { type = m[1] === 'tv' ? 'show' : 'movie'; id = m[2]; mode = 'tmdb'; break; }
         }
     }
-    // 2. IMDb
+    // IMDb Fallback
     if (!id) {
         for (let i = 0; i < document.links.length; i++) {
             const href = document.links[i].href;
@@ -527,11 +538,6 @@ function scan() {
             container.dataset.fetched = 'true';
             fetchRatings(container, id, type, mode);
         }
-    } else {
-        // Not found yet? Keep looking visually
-        let retries = parseInt(container.dataset.retries || '0');
-        container.dataset.retries = retries + 1;
-        if (retries > 60) updateStatus(container, 'No ID Found', '#e53935'); // 30 seconds timeout
     }
 }
 
