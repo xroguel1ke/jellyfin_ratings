@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.53 — Parse Fix & Ebert Restore)
+// @name         Jellyfin Ratings (v10.1.54 — Placement Fix)
 // @namespace    https://mdblist.com
-// @version      10.1.53
-// @description  Master Rating links. Gear icon first. Handles non-JSON API errors gracefully. Restores v10.1.12 Roger Ebert linking. Marker-based loading.
+// @version      10.1.54
+// @description  Based on v10.1.51. Moves ratings inline after Parental Rating (like reference script). Keeps Ends At before ratings.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.53 loading...');
+console.log('[Jellyfin Ratings] v10.1.54 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -23,7 +23,6 @@ const DEFAULTS = {
     },
     display: {
         showPercentSymbol: true, colorNumbers: true, colorIcons: false,
-        dynamicIcons: true,
         posX: 0, posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
@@ -70,11 +69,6 @@ const LOGO = {
     metacritic_critic: `${ICON_BASE}/Metacritic.png`, metacritic_user: `${ICON_BASE}/mus2.png`
 };
 
-const DYNAMIC_LOGO = {
-    tomatoes_rotten: `${ICON_BASE}/Rotten_Tomatoes_rotten.png`,
-    audience_rotten: `${ICON_BASE}/Rotten_Tomatoes_negative_audience.png`
-};
-
 const LABEL = {
     master: 'Master Rating', imdb: 'IMDb', tmdb: 'TMDb', trakt: 'Trakt', letterboxd: 'Letterboxd',
     rotten_tomatoes_critic: 'Rotten Tomatoes (Critic)', rotten_tomatoes_audience: 'Rotten Tomatoes (Audience)',
@@ -95,7 +89,13 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        if(typeof p.display.dynamicIcons === 'undefined') p.display.dynamicIcons = DEFAULTS.display.dynamicIcons;
+        if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
+            p.display.posX = 0; p.display.posY = 0;
+        }
+        if (p.display.posX > 500) p.display.posX = 500;
+        if (p.display.posX < -700) p.display.posX = -700;
+        if (p.display.posY > 500) p.display.posY = 500;
+        if (p.display.posY < -500) p.display.posY = -500;
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -133,10 +133,15 @@ function updateGlobalStyles() {
     document.documentElement.style.setProperty('--mdbl-x', `${CFG.display.posX}px`);
     document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
 
+    // MODIFIED CSS: Inline Flex + Margins
     let rules = `
         .mdblist-rating-container {
-            display: inline-flex; flex-wrap: wrap; align-items: center;
-            margin-left: 14px;
+            display: inline-flex; 
+            flex-wrap: wrap; 
+            align-items: center;
+            margin-left: 14px; /* Space after parental rating */
+            margin-top: ${CFG.spacing.ratingsTopGapPx}px;
+            box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
             z-index: 2147483647; position: relative; 
             pointer-events: auto !important; 
@@ -169,13 +174,16 @@ function updateGlobalStyles() {
 
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
         
+        /* Ends At Style - Inline */
         #customEndsAt { 
             font-size: inherit; opacity: 0.9; cursor: default; 
             margin-left: 14px; display: inline-block; padding: 2px 4px;
-            margin-right: 0px;
+            vertical-align: baseline;
         }
         
+        /* RESTORE PARENTAL RATING VISIBILITY */
         .mediaInfoOfficialRating { display: inline-flex !important; }
+        
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
     `;
 
@@ -262,15 +270,12 @@ function parseRuntimeToMinutes(text) {
 }
 
 function updateEndsAt() {
-    const allWrappers = document.querySelectorAll('.itemMiscInfo');
-    let primary = null;
-    for (const el of allWrappers) {
-        if (el.offsetParent !== null) { primary = el; break; }
-    }
-    if (!primary) return; 
+    const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
+    if (!primary) return;
 
     let minutes = 0;
     const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
+    
     if (detailContainer) {
         const walker = document.createTreeWalker(detailContainer, NodeFilter.SHOW_TEXT, null, false);
         let node;
@@ -283,32 +288,37 @@ function updateEndsAt() {
         }
     }
     
-    const parent = primary.parentNode;
-    if (parent) {
-        parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
-            if (el.id === 'customEndsAt') return;
-            if (el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
-            if (el.classList.contains('mediaInfoOfficialRating')) return;
-            const t = (el.textContent || '').toLowerCase();
-            if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
-                 if (minutes > 0) el.style.display = 'none';
-                 else el.style.display = ''; 
-            }
-        });
-    }
+    // Hide original "Ends at" text if found (BUT PROTECT OUR CONTAINER AND PARENTAL RATING)
+    document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
+        if (el.id === 'customEndsAt') return;
+        if (el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
+        if (el.classList.contains('mediaInfoOfficialRating')) return;
+        
+        const t = (el.textContent || '').toLowerCase();
+        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
+             if (minutes > 0) el.style.display = 'none';
+             else el.style.display = ''; 
+        }
+    });
+
+    // Also JS Hide defaults just in case CSS misses them (EXCEPT Parental Rating)
     document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
 
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
+        const content = `Ends at ${timeStr}`;
+
         let span = primary.querySelector('#customEndsAt');
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
+            span.title = 'Calculated finish time';
             const rc = primary.querySelector('.mdblist-rating-container');
-            if (rc) primary.insertBefore(span, rc); // Consistent placement
+            // INSERT BEFORE RATINGS (so order is [Parental] [Ends At] [Ratings])
+            if (rc) primary.insertBefore(span, rc);
             else primary.appendChild(span);
         }
-        span.textContent = `Ends at ${timeStr}`;
+        if (span.textContent !== content) span.textContent = content;
         span.style.display = ''; 
     } else {
         const span = primary.querySelector('#customEndsAt');
@@ -316,7 +326,7 @@ function updateEndsAt() {
     }
 }
 
-// === LINK BUILDER ===
+// v10.1.51 Link Logic (Original + FixUrl)
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
@@ -357,15 +367,15 @@ function generateLink(key, ids, apiLink, type, title) {
             return `https://myanimelist.net/anime.php?q=${safeTitle}`;
             
         case 'roger_ebert':
-             // STRICT v10.1.12 LOGIC (Requested)
-             if (sLink && sLink !== '#') {
-                 return fixUrl(sLink, 'rogerebert.com');
+             if (sLink && sLink.length > 2 && sLink !== '#') {
+                 if (sLink.startsWith('http')) return sLink;
+                 let path = sLink.startsWith('/') ? sLink : `/${sLink}`;
+                 if (!path.includes('/reviews/')) path = `/reviews${path}`;
+                 return `https://www.rogerebert.com${path}`;
              }
-             // Minimal fallback if API link is totally missing
              return `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}`;
 
-        default:
-            return '#';
+        default: return '#';
     }
 }
 
@@ -376,15 +386,8 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const r = Math.round(n);
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
-    // Dynamic Icons
-    let currentLogo = LOGO[key];
-    if (CFG.display.dynamicIcons) {
-        if (key === 'rotten_tomatoes_critic' && r < 60) currentLogo = DYNAMIC_LOGO.tomatoes_rotten;
-        else if (key === 'rotten_tomatoes_audience' && r < 60) currentLogo = DYNAMIC_LOGO.audience_rotten;
-    }
-
     const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${currentLogo}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
+    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
 }
 
 function renderGearIcon(container, statusText = '') {
@@ -504,29 +507,23 @@ function fetchRatings(container, id, type, apiMode) {
     } catch(e) {}
 
     container.dataset.fetching = 'true';
-    updateStatus(container, `Fetching...`);
+    updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
     
     GM_xmlhttpRequest({
         method: 'GET', url: apiUrl,
         onload: r => {
             container.dataset.fetching = 'false';
-            
-            // HANDLE TEXT RESPONSES GRACEFULLY
-            if (r.status !== 200) {
-                // Try to show the API text message (e.g. "Limit exceeded")
-                let msg = `API ${r.status}`;
-                if (r.responseText && r.responseText.length < 20) msg = r.responseText;
-                console.error('[MDBList] API Error:', r.status, r.responseText);
-                updateStatus(container, msg, '#e53935');
+            if (r.status !== 200) { 
+                console.error('[MDBList] API Error:', r.status);
+                updateStatus(container, `API ${r.status}`, '#e53935');
                 return;
             }
-
             try {
                 const d = JSON.parse(r.responseText);
                 localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
                 renderRatings(container, d, currentImdbId, type);
             } catch(e) { 
-                console.error('[MDBList] Parse Error. Raw response:', r.responseText); 
+                console.error('[MDBList] Parse Error', e); 
                 updateStatus(container, 'Parse Err', '#e53935');
             }
         },
@@ -538,18 +535,22 @@ function fetchRatings(container, id, type, apiMode) {
     });
 }
 
-// === MARKER-BASED SCANNER ===
+// === MARKER-BASED SCANNER (v10.1.51) ===
 function scan() {
     updateEndsAt();
     
+    // Scan TMDB links
     document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])').forEach(link => {
         link.dataset.mdblProcessed = "true"; 
         const m = link.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
-            injectContainer(m[2], m[1] === 'tv' ? 'show' : 'movie', 'tmdb');
+            const type = m[1] === 'tv' ? 'show' : 'movie';
+            const id = m[2];
+            injectContainer(id, type, 'tmdb');
         }
     });
     
+    // Scan IMDb links (Fallback)
     document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])').forEach(link => {
         link.dataset.mdblProcessed = "true";
         const m = link.href.match(/tt\d+/);
@@ -560,6 +561,7 @@ function scan() {
 }
 
 function injectContainer(id, type, apiMode) {
+    // Find visible wrapper
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
     for (const el of allWrappers) {
@@ -567,9 +569,12 @@ function injectContainer(id, type, apiMode) {
     }
     if (!wrapper) return;
 
-    let target = wrapper.querySelector('.mediaInfoOfficialRating');
-    let container = wrapper.querySelector('.mdblist-rating-container');
+    // MODIFIED PLACEMENT LOGIC
+    // 1. Try to find Official Rating (FSK)
+    const officialRating = wrapper.querySelector('.mediaInfoOfficialRating');
     
+    // Check if we already have a container in this specific wrapper
+    let container = wrapper.querySelector('.mdblist-rating-container');
     if (container && container.dataset.tmdbId !== id) {
         container.remove();
         container = null;
@@ -580,8 +585,17 @@ function injectContainer(id, type, apiMode) {
         container.className = 'mdblist-rating-container';
         container.dataset.tmdbId = id;
         
-        if (target) target.parentNode.insertBefore(container, target.nextSibling);
-        else wrapper.appendChild(container);
+        // INJECT AFTER OFFICIAL RATING if present
+        if (officialRating) {
+            if (officialRating.nextSibling) {
+                wrapper.insertBefore(container, officialRating.nextSibling);
+            } else {
+                wrapper.appendChild(container);
+            }
+        } else {
+            // Fallback: End of wrapper
+            wrapper.appendChild(container);
+        }
         
         renderGearIcon(container, 'Loading...');
         fetchRatings(container, id, type, apiMode);
@@ -696,7 +710,6 @@ function renderMenuContent(panel) {
         <div class="mdbl-subtle">Display</div>
         ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
         ${row('Color icons', `<input type="checkbox" id="d_cicon" ${CFG.display.colorIcons?'checked':''}>`)}
-        ${row('Dynamic Icons', `<input type="checkbox" id="d_dyn" ${CFG.display.dynamicIcons?'checked':''}>`)}
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
         ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -700, 500, CFG.display.posX)}
@@ -746,7 +759,6 @@ function renderMenuContent(panel) {
     const updateLiveAll = () => {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
-        CFG.display.dynamicIcons = panel.querySelector('#d_dyn').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
         CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; 
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
