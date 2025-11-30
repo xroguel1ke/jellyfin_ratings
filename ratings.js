@@ -1,20 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.50 — TODOs Added)
+// @name         Jellyfin Ratings (v10.1.51 — Marker Strategy)
 // @namespace    https://mdblist.com
-// @version      10.1.50
-// @description  Master Rating links to Wikipedia. Gear icon first. Roger Ebert links fixed.
+// @version      10.1.51
+// @description  Master Rating links to Wikipedia. Gear icon first. Uses DOM element marking for reliable page transition detection (like reference script). Keeps all link fixes.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-/* ==========================================================================
-   TODO LIST / KNOWN ISSUES:
-   1. Script loads ratings only on every 3rd page navigation (SPA State/Timing issue).
-   2. AniList ratings are never displayed (ID detection or API mapping issue).
-   ==========================================================================
-*/
-
-console.log('[Jellyfin Ratings] v10.1.50 loading...');
+console.log('[Jellyfin Ratings] v10.1.51 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -320,8 +313,8 @@ function updateEndsAt() {
     }
 }
 
-// === SMART LINK BUILDER ===
-function generateLink(key, ids, apiLink, type, title, year) {
+// === LINK LOGIC (v10.1.50 Style) ===
+function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
     const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
@@ -329,23 +322,14 @@ function generateLink(key, ids, apiLink, type, title, year) {
     if (sLink.startsWith('http') && key !== 'metacritic_user' && key !== 'roger_ebert') return sLink;
 
     switch(key) {
-        case 'imdb': 
-            return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': 
-            return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        case 'trakt': 
-            return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
-        case 'letterboxd': 
-            if (sLink.includes('/film/') || sLink.includes('/slug/')) {
-                return `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}`;
-            }
-            return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
+        case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
+        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
+        case 'trakt': return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
         
         case 'metacritic_critic':
         case 'metacritic_user': 
-            if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) {
-                return `https://www.metacritic.com${sLink}`;
-            }
+            if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) return `https://www.metacritic.com${sLink}`;
             const slug = localSlug(title);
             return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
 
@@ -366,16 +350,16 @@ function generateLink(key, ids, apiLink, type, title, year) {
             return `https://myanimelist.net/anime.php?q=${safeTitle}`;
             
         case 'roger_ebert':
+             // Logic from v10.1.12 / 10.1.48
              if (sLink && sLink.length > 2 && sLink !== '#') {
                  if (sLink.startsWith('http')) return sLink;
                  let path = sLink.startsWith('/') ? sLink : `/${sLink}`;
                  if (!path.includes('/reviews/')) path = `/reviews${path}`;
                  return `https://www.rogerebert.com${path}`;
              }
-             return `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}+${year}`;
+             return `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}`;
 
-        default:
-            return '#';
+        default: return '#';
     }
 }
 
@@ -443,7 +427,7 @@ function renderRatings(container, data, pageImdbId, type) {
     };
     
     const add = (k, v, apiLink, c, tit, kind) => {
-        const safeLink = generateLink(k, ids, apiLink, type, data.title, data.year);
+        const safeLink = generateLink(k, ids, apiLink, type, data.title);
         html += createRatingHtml(k, v, safeLink, c, tit, kind);
     };
 
@@ -460,14 +444,13 @@ function renderRatings(container, data, pageImdbId, type) {
             else if (s.includes('tmdb')) { add('tmdb', v, apiLink, c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
             else if (s.includes('trakt')) { add('trakt', v, apiLink, c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
             else if (s.includes('letterboxd')) { add('letterboxd', v, apiLink, c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
-            
             else if (s.includes('tomatoes') || s.includes('rotten') || s.includes('popcorn')) {
                 if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, apiLink, c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
                 else { add('rotten_tomatoes_critic', v, apiLink, c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
             }
             else if (s.includes('metacritic')) {
                 if(s.includes('user')) { add('metacritic_user', v, apiLink, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
-                else { add('metacritic_critic', v, apiLink, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
+                else { add('metacritic_critic', v, apiLink, c, 'Metascore', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
             }
             else if (s.includes('roger')) { add('roger_ebert', v, apiLink, c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); }
             else if (s.includes('anilist')) { add('anilist', v, apiLink, c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); }
@@ -541,72 +524,63 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === ROBUST ID HUNTER ===
-
+// === SCANNER LOGIC (MARKER STRATEGY) ===
 function scan() {
     updateEndsAt();
-    const currentJellyfinId = getJellyfinId();
+    
+    // Strategy: Find unprocessed TMDB/IMDb links in the DOM
+    // We use a data attribute to mark them so we don't re-process endlessly
+    // But if the link is destroyed/recreated (page nav), we catch it again.
+    
+    // 1. Look for TMDB links (Preferred)
+    const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
+    if (tmdbLinks.length > 0) {
+        const link = tmdbLinks[0]; // Take the first one
+        link.dataset.mdblProcessed = "true";
+        
+        const m = link.href.match(/\/(movie|tv)\/(\d+)/);
+        if (m) {
+            const type = m[1] === 'tv' ? 'show' : 'movie';
+            const id = m[2];
+            injectContainer(id, type, 'tmdb');
+            return; // Done for this cycle
+        }
+    }
+
+    // 2. Look for IMDb links (Fallback)
+    const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
+    if (imdbLinks.length > 0) {
+        const link = imdbLinks[0];
+        link.dataset.mdblProcessed = "true";
+        
+        const m = link.href.match(/tt\d+/);
+        if (m) {
+            injectContainer(m[0], 'movie', 'imdb'); // Default to movie for imdb if unknown
+            return;
+        }
+    }
+}
+
+function injectContainer(id, type, apiMode) {
+    // Find the right place to inject (First visible itemMiscInfo)
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
-    for (const el of allWrappers) { if (el.offsetParent !== null) { wrapper = el; break; } }
+    for (const el of allWrappers) {
+        if (el.offsetParent !== null) { wrapper = el; break; }
+    }
     if (!wrapper) return;
 
-    let container = wrapper.querySelector('.mdblist-rating-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.className = 'mdblist-rating-container';
-        container.dataset.jellyfinId = currentJellyfinId;
-        wrapper.appendChild(container);
-        renderGearIcon(container, 'Scanning...');
-        container.dataset.retries = 0; 
-    } else if (container.dataset.jellyfinId !== currentJellyfinId) {
-        container.innerHTML = '';
-        renderGearIcon(container, 'Scanning...');
-        container.dataset.jellyfinId = currentJellyfinId;
-        container.dataset.tmdbId = '';
-        container.dataset.fetched = '';
-        container.dataset.fetching = 'false';
-        container.dataset.retries = 0;
-    }
+    // Clean up OLD container if it exists in this wrapper (from previous page)
+    const oldContainer = wrapper.querySelector('.mdblist-rating-container');
+    if (oldContainer) oldContainer.remove();
 
-    if (container.dataset.fetched === 'true') return;
-
-    let retries = parseInt(container.dataset.retries || '0');
-    if (retries > 50) {
-        const st = container.querySelector('.mdbl-status-text');
-        if (st && container.dataset.fetched !== 'true' && !st.textContent.includes('Ratings')) {
-             updateStatus(container, 'No ID', '#e53935');
-        }
-        return;
-    }
-    container.dataset.retries = retries + 1;
-
-    let type = 'movie', id = null, mode = 'tmdb';
+    const container = document.createElement('div');
+    container.className = 'mdblist-rating-container';
+    container.dataset.tmdbId = id; // Mark with ID
+    wrapper.appendChild(container);
     
-    for (let i = 0; i < document.links.length; i++) {
-        const href = document.links[i].href;
-        if (href.includes('themoviedb.org')) {
-            const m = href.match(/\/(movie|tv)\/(\d+)/);
-            if (m) { type = m[1] === 'tv' ? 'show' : 'movie'; id = m[2]; mode = 'tmdb'; break; }
-        }
-    }
-    if (!id) {
-        for (let i = 0; i < document.links.length; i++) {
-            const href = document.links[i].href;
-            if (href.includes('imdb.com/title/')) {
-                const m = href.match(/tt\d+/);
-                if (m) { id = m[0]; mode = 'imdb'; break; }
-            }
-        }
-    }
-
-    if (id) {
-        if (container.dataset.tmdbId !== id) {
-            container.dataset.tmdbId = id;
-            container.dataset.fetched = 'true';
-            fetchRatings(container, id, type, mode);
-        }
-    }
+    renderGearIcon(container, 'Loading...');
+    fetchRatings(container, id, type, apiMode);
 }
 
 setInterval(scan, 500);
