@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.35 — The Inspector)
+// @name         Jellyfin Ratings (v10.1.36 — Type Safety Fix)
 // @namespace    https://mdblist.com
-// @version      10.1.35
-// @description  Master Rating links to Wikipedia. Gear icon first. Robust Error Logging to find "Parse Err" cause.
+// @version      10.1.36
+// @description  Master Rating links to Wikipedia. Gear icon first. Fixes "startsWith" crash on numeric URLs.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.35 loading...');
+console.log('[Jellyfin Ratings] v10.1.36 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -224,8 +224,10 @@ updateGlobalStyles();
 
 function fixUrl(url, domain) {
     if (!url) return null;
-    if (url.startsWith('http')) return url;
-    const clean = url.startsWith('/') ? url.substring(1) : url;
+    // FIX: Ensure url is a string before checking
+    const strUrl = String(url);
+    if (strUrl.startsWith('http')) return strUrl;
+    const clean = strUrl.startsWith('/') ? strUrl.substring(1) : strUrl;
     return `https://${domain}/${clean}`;
 }
 
@@ -322,7 +324,21 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const n = parseFloat(val) * (SCALE[key] || 1);
     const r = Math.round(n);
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
-    const safeLink = (link && link !== '#' && !link.startsWith('http://192')) ? link : '#';
+    
+    // FIX: Type checking on link
+    let safeLink = '#';
+    if (link && link !== '#') {
+        let sLink = String(link);
+        if (!sLink.startsWith('http')) {
+           // Specific handlers could go here but default is #
+           if (sLink.length > 0 && sLink !== '0') {
+               // Just let it fallback to # if numeric or weird
+           }
+        } else {
+           safeLink = sLink;
+        }
+    }
+    
     const style = safeLink === '#' ? 'cursor:default;' : '';
     return `<a href="${safeLink}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
 }
@@ -375,6 +391,7 @@ function renderRatings(container, data, pageImdbId, type) {
     const add = (k, v, lnk, cnt, tit, kind) => html += createRatingHtml(k, v, lnk, cnt, tit, kind);
     const ids = { imdb: data.imdbid || data.imdb_id || pageImdbId, tmdb: data.id || data.tmdbid || data.tmdb_id, trakt: data.traktid || data.trakt_id, slug: data.slug || data.ids?.slug };
     const fallbackSlug = localSlug(data.title || '');
+    const metaType = type === 'show' ? 'tv' : 'movie';
     let masterSum = 0, masterCount = 0;
     const trackMaster = (val, scaleKey) => { if (val !== null && !isNaN(parseFloat(val))) { masterSum += parseFloat(val) * (SCALE[scaleKey] || 1); masterCount++; } };
 
@@ -391,7 +408,7 @@ function renderRatings(container, data, pageImdbId, type) {
                 else { add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
             }
             else if (s.includes('metacritic')) {
-                const lnk = fallbackSlug ? `https://www.metacritic.com/${type === 'show' ? 'tv' : 'movie'}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
+                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
                 if(s.includes('user')) { add('metacritic_user', v, lnk, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
                 else { add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
             }
@@ -410,13 +427,14 @@ function renderRatings(container, data, pageImdbId, type) {
         contentDiv.innerHTML = html;
         while (contentDiv.firstChild) container.appendChild(contentDiv.firstChild);
         
-        // Clear status since we have content
+        // Remove status text if we have ratings
         const st = container.querySelector('.mdbl-status-text');
         if(st) st.remove();
-        
+
         refreshDomElements();
     } else {
-        updateStatus(container, 'API: No Ratings Found', '#e53935');
+        // EXPLICITLY SHOW NO DATA
+        updateStatus(container, 'MDB: 0 Ratings', '#e53935');
     }
 }
 
@@ -440,31 +458,17 @@ function fetchRatings(container, id, type, apiMode) {
         method: 'GET', url: apiUrl,
         onload: r => {
             container.dataset.fetching = 'false';
-            console.log('[MDBList] RAW:', r.responseText); // DEBUG
-            
             if (r.status !== 200) { 
                 console.error('[MDBList] API Error:', r.status);
                 updateStatus(container, `API ${r.status}`, '#e53935');
                 return;
             }
-            
-            // CHECK FOR EMPTY BODY
-            if (!r.responseText || r.responseText.trim() === '') {
-                updateStatus(container, 'API Empty', '#e53935');
-                return;
-            }
-
             try {
                 const d = JSON.parse(r.responseText);
-                // Check if valid response format
-                if (d && (d.ratings || d.title)) {
-                    localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
-                    renderRatings(container, d, currentImdbId, type);
-                } else {
-                    updateStatus(container, 'API Bad Data', '#e53935');
-                }
+                localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
+                renderRatings(container, d, currentImdbId, type);
             } catch(e) { 
-                console.error('[MDBList] Parse Error:', e); 
+                console.error('[MDBList] Parse Error', e); 
                 updateStatus(container, 'Parse Err', '#e53935');
             }
         },
@@ -481,6 +485,8 @@ function getJellyfinId() {
     const params = new URLSearchParams(url.includes('?') ? url.split('?')[1] : url);
     return params.get('id');
 }
+
+// === ROBUST ID HUNTER (DOM ONLY - RESTORED v10.1.23 LOGIC) ===
 
 function scan() {
     updateEndsAt();
@@ -499,6 +505,7 @@ function scan() {
         renderGearIcon(container, 'Scanning...');
         container.dataset.retries = 0; 
     } else if (container.dataset.jellyfinId !== currentJellyfinId) {
+        // Reset Logic on Navigation
         container.innerHTML = '';
         renderGearIcon(container, 'Scanning...');
         container.dataset.jellyfinId = currentJellyfinId;
@@ -510,6 +517,7 @@ function scan() {
 
     if (container.dataset.fetched === 'true') return;
 
+    // Retry Logic
     let retries = parseInt(container.dataset.retries || '0');
     if (retries > 50) {
         const st = container.querySelector('.mdbl-status-text');
@@ -522,7 +530,7 @@ function scan() {
 
     let type = 'movie', id = null, mode = 'tmdb';
     
-    // TMDB
+    // 1. TMDB
     for (let i = 0; i < document.links.length; i++) {
         const href = document.links[i].href;
         if (href.includes('themoviedb.org')) {
@@ -530,7 +538,7 @@ function scan() {
             if (m) { type = m[1] === 'tv' ? 'show' : 'movie'; id = m[2]; mode = 'tmdb'; break; }
         }
     }
-    // IMDb
+    // 2. IMDb
     if (!id) {
         for (let i = 0; i < document.links.length; i++) {
             const href = document.links[i].href;
