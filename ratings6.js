@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.22 — Container First)
+// @name         Jellyfin Ratings (v10.1.23 — URL Authority)
 // @namespace    https://mdblist.com
-// @version      10.1.22
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Always renders Gear icon immediately.
+// @version      10.1.23
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Forces reload on URL change.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.22 loading...');
+console.log('[Jellyfin Ratings] v10.1.23 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -156,7 +156,7 @@ function updateGlobalStyles() {
             z-index: 2147483647; position: relative; 
             pointer-events: auto !important; 
             flex-shrink: 0;
-            min-height: 24px; /* Ensure visibility even if empty */
+            min-height: 24px;
         }
         .mdbl-rating-item {
             display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
@@ -172,7 +172,7 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         
-        /* Settings Button - Forced first via order */
+        /* Settings Button */
         .mdbl-settings-btn {
             opacity: 0.6; margin-right: 8px; border-right: 1px solid rgba(255,255,255,0.2); 
             padding: 4px 8px 4px 0;
@@ -194,13 +194,11 @@ function updateGlobalStyles() {
             padding: 2px 4px;
         }
 
-        /* --- PARENTAL RATING RESTORATION --- */
         .mediaInfoOfficialRating {
             display: inline-flex !important;
-            margin-right: 14px; /* Spacing between Rating and Ends At */
+            margin-right: 14px;
         }
 
-        /* --- AGGRESSIVE HIDING OF DEFAULT RATINGS (EXCEPT Parental) --- */
         .starRatingContainer, 
         .mediaInfoCriticRating, 
         .mediaInfoAudienceRating,
@@ -295,11 +293,10 @@ function parseRuntimeToMinutes(text) {
 }
 
 function updateEndsAt() {
-    // VISIBILITY CHECK: Find the FIRST Visible itemMiscInfo
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let primary = null;
     for (const el of allWrappers) {
-        if (el.offsetParent !== null) { // Is visible?
+        if (el.offsetParent !== null) { 
             primary = el;
             break;
         }
@@ -322,7 +319,6 @@ function updateEndsAt() {
         }
     }
     
-    // Only hide elements inside the VISIBLE container
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -380,10 +376,8 @@ function createRatingHtml(key, val, link, count, title, kind) {
     `;
 }
 
-// Helper to inject just the gear icon (when no ratings are available yet)
 function renderGearIcon(container) {
-    if (container.querySelector('.mdbl-settings-btn')) return; // Already there
-    
+    if (container.querySelector('.mdbl-settings-btn')) return;
     container.innerHTML = `
     <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" style="order: -9999 !important;" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
        <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
@@ -496,9 +490,8 @@ function renderRatings(container, data, pageImdbId, type) {
 window.MDBL_OPEN_SETTINGS_GL = () => openSettingsMenu();
 
 function fetchRatings(container, tmdbId, type) {
-    if (container.dataset.fetching === 'true') return; // Debounce fetch
+    if (container.dataset.fetching === 'true') return; 
     
-    // Check if ID matches current container ID (sanity check)
     if (container.dataset.tmdbId !== tmdbId) {
         container.dataset.tmdbId = tmdbId;
     }
@@ -535,45 +528,59 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// === CONTAINER FIRST ENGINE ===
+// === URL AUTHORITY ENGINE ===
+
+// Helper to extract Jellyfin Internal ID from URL
+function getJellyfinId() {
+    // Looks for ?id=XXXXX or &id=XXXXX
+    const url = window.location.hash || window.location.search;
+    const params = new URLSearchParams(url.includes('?') ? url.split('?')[1] : url);
+    return params.get('id');
+}
 
 function scan() {
     updateEndsAt();
 
-    // 1. Get current IMDB ID in DOM (anywhere)
-    const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
-    if (imdbLink) {
-        const m = imdbLink.href.match(/tt\d+/);
-        if (m) currentImdbId = m[0];
-    }
+    const currentJellyfinId = getJellyfinId();
 
-    // 2. Find the VISIBLE wrapper to inject into.
+    // 1. Find the VISIBLE wrapper
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
     for (const el of allWrappers) {
-        if (el.offsetParent !== null) { // Checks if element is visible
+        if (el.offsetParent !== null) { 
             wrapper = el;
             break;
         }
     }
 
-    if (!wrapper) return; // No visible target
+    if (!wrapper) return; 
 
-    // 3. Ensure Container Exists IMMEDIATELY (Container First)
+    // 2. Ensure Container Exists & Matches Jellyfin ID (URL Authority)
     let container = wrapper.querySelector('.mdblist-rating-container');
     if (!container) {
         container = document.createElement('div');
         container.className = 'mdblist-rating-container';
+        container.dataset.jellyfinId = currentJellyfinId; // Bind to current Page ID
         wrapper.appendChild(container);
-    }
-
-    // 4. Ensure Gear Icon exists IMMEDIATELY
-    if (!container.querySelector('.mdbl-settings-btn')) {
         renderGearIcon(container);
+    } 
+    else if (container.dataset.jellyfinId !== currentJellyfinId) {
+        // INVALID STATE DETECTED: The container belongs to a previous page.
+        // WIPE IT IMMEDIATELY so we don't show wrong data.
+        container.innerHTML = '';
+        renderGearIcon(container);
+        
+        // Reset state
+        container.dataset.jellyfinId = currentJellyfinId;
+        container.dataset.tmdbId = '';
+        container.dataset.fetched = '';
+        container.dataset.fetching = 'false';
     }
 
-    // 5. SEARCH GLOBAL DOCUMENT FOR TMDB ID
-    // Iterate links to find the relevant ID
+    // 3. If fetched, we are done.
+    if (container.dataset.fetched === 'true') return;
+
+    // 4. Global Search for External ID (TMDB/IMDB)
     const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]');
     let type = null, id = null;
     
@@ -586,15 +593,12 @@ function scan() {
         }
     }
 
-    // 6. If ID found, trigger fetch
+    // 5. If ID found, trigger fetch
     if (id && type) {
-        // If the container has never been fetched OR has a different ID
-        if (container.dataset.tmdbId !== id || !container.dataset.fetched) {
-            container.dataset.tmdbId = id;
-            container.dataset.type = type;
-            container.dataset.fetched = 'true'; // Mark as attempt made
-            fetchRatings(container, id, type);
-        }
+        container.dataset.tmdbId = id;
+        container.dataset.type = type;
+        container.dataset.fetched = 'true'; 
+        fetchRatings(container, id, type);
     }
 }
 
