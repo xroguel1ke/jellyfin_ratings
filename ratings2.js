@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.2 — Fixed UI & Ranges)
+// @name         Jellyfin Ratings (v10.1.9 — Layout Rewrite)
 // @namespace    https://mdblist.com
-// @version      10.1.2
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky" to avoid Google Redirect Notice.
+// @version      10.1.9
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Compact Mode default. Fixed layout for wide sliders.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.2 loading...');
+console.log('[Jellyfin Ratings] v10.1.9 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -31,7 +31,6 @@ const DEFAULTS = {
         posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
-        compactLevel: 0,
         endsAt24h: true
     },
     spacing: { ratingsTopGapPx: 4 },
@@ -103,6 +102,15 @@ function loadConfig() {
         if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
             p.display.posX = 0; p.display.posY = 0;
         }
+
+        // --- FORCE CLAMP VALUES ON LOAD ---
+        // This ensures your old "1000" setting is instantly corrected
+        if (p.display.posX > 500) p.display.posX = 500;
+        if (p.display.posX < -500) p.display.posX = -500;
+        if (p.display.posY > 400) p.display.posY = 400;
+        if (p.display.posY < -400) p.display.posY = -400;
+        // ----------------------------------
+
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -144,13 +152,16 @@ function updateGlobalStyles() {
     document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
 
     let rules = `
+        /* Main Container */
         .mdblist-rating-container {
             display: flex; flex-wrap: wrap; align-items: center;
             justify-content: flex-end; 
             width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
-            z-index: 2147483647; position: relative; pointer-events: auto; flex-shrink: 0;
+            z-index: 2147483647; position: relative; 
+            pointer-events: auto !important; 
+            flex-shrink: 0;
         }
         .mdbl-rating-item {
             display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
@@ -161,28 +172,28 @@ function updateGlobalStyles() {
         }
         .mdbl-rating-item:hover {
             transform: scale(1.15) rotate(2deg);
-            z-index: 1000;
+            z-index: 2147483647;
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
-        .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; }
+        
+        .mdbl-settings-btn {
+            opacity: 0.6; margin-left: 8px; border-left: 1px solid rgba(255,255,255,0.2); 
+            padding: 4px 8px; cursor: pointer !important; pointer-events: auto !important;
+        }
+        .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
+        .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; pointer-events: none; }
+        
+        .itemMiscInfo, .mainDetailRibbon, .detailRibbon { 
+            overflow: visible !important; contain: none !important; position: relative; z-index: 10; 
+        }
         
         #customEndsAt { 
-            font-size: inherit; opacity: 0.8; cursor: pointer; 
+            font-size: inherit; opacity: 0.9; cursor: default; 
             margin-left: 10px; display: inline-block; vertical-align: baseline;
-            pointer-events: auto; position: relative; z-index: 999;
+            pointer-events: auto; position: relative; z-index: 9999;
             padding: 2px 4px;
         }
-        #customEndsAt:hover { opacity: 1.0; text-decoration: underline; }
-        
-        #mdbl-settings-trigger {
-            display: inline-flex; align-items: center; justify-content: center;
-            margin-left: 6px; cursor: pointer !important; opacity: 0.7; transition: opacity 0.2s, transform 0.2s;
-            width: 1.3em; height: 1.3em; vertical-align: middle;
-            pointer-events: auto; position: relative; z-index: 2147483647;
-        }
-        #mdbl-settings-trigger:hover { opacity: 1; transform: rotate(45deg); }
-        #mdbl-settings-trigger svg { width: 100%; height: 100%; fill: currentColor; pointer-events: none; }
     `;
 
     Object.keys(CFG.priorities).forEach(key => {
@@ -211,7 +222,7 @@ function getRatingColor(bands, choice, r) {
 
 function refreshDomElements() {
     updateGlobalStyles(); 
-    document.querySelectorAll('.mdbl-rating-item').forEach(el => {
+    document.querySelectorAll('.mdbl-rating-item:not(.mdbl-settings-btn)').forEach(el => {
         const score = parseFloat(el.dataset.score);
         if (isNaN(score)) return;
         const color = getRatingColor(CFG.display.colorBands, CFG.display.colorChoice, score);
@@ -271,66 +282,51 @@ function parseRuntimeToMinutes(text) {
 }
 
 function updateEndsAt() {
-    document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
-        if (el.id === 'customEndsAt' || el.id === 'mdbl-settings-trigger' || el.closest('.mdblist-rating-container')) return;
-        const t = (el.textContent || '').toLowerCase();
-        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am') || (t.includes('%') && (t.includes('tomato') || el.querySelector('img[src*="tomato"]')))) {
-             el.style.display = 'none';
-        }
-    });
-    document.querySelectorAll('.mediaInfoCriticRating, .mediaInfoAudienceRating, .starRatingContainer').forEach(el => el.style.display = 'none');
-
     const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
     if (!primary) return;
 
     let minutes = 0;
-    for (const el of primary.querySelectorAll('.mediaInfoItem, .mediaInfoText, span, div')) {
-        const parsed = parseRuntimeToMinutes((el.textContent || '').trim());
-        if (parsed > 0) { minutes = parsed; break; }
-    }
-    if (minutes === 0) minutes = parseRuntimeToMinutes((primary.textContent || '').trim());
+    const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
     
-    if (!minutes) {
-        if (primary.querySelector('#customEndsAt')) primary.querySelector('#customEndsAt').remove();
-        if (primary.querySelector('#mdbl-settings-trigger')) primary.querySelector('#mdbl-settings-trigger').remove();
-        return;
+    if (detailContainer) {
+        const walker = document.createTreeWalker(detailContainer, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        while ((node = walker.nextNode())) {
+            const val = node.nodeValue.trim();
+            if (val.length > 0 && val.length < 20 && /\d/.test(val)) {
+                const p = parseRuntimeToMinutes(val);
+                if (p > 0) { minutes = p; break; }
+            }
+        }
     }
+    
+    document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
+        if (el.id === 'customEndsAt' || el.closest('.mdblist-rating-container')) return;
+        const t = (el.textContent || '').toLowerCase();
+        if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
+             if (minutes > 0) el.style.display = 'none';
+             else el.style.display = ''; 
+        }
+    });
 
-    const timeStr = formatTime(minutes);
-    const content = `Ends at ${timeStr}`;
+    if (minutes > 0) {
+        const timeStr = formatTime(minutes);
+        const content = `Ends at ${timeStr}`;
 
-    let span = primary.querySelector('#customEndsAt');
-    if (!span) {
-        span = document.createElement('div');
-        span.id = 'customEndsAt';
-        span.title = 'Click to open Settings';
-        span.onclick = (e) => {
-            e.preventDefault(); 
-            e.stopPropagation();
-            openSettingsMenu();
-        };
-        
-        const ref = primary.querySelector('.mediaInfoOfficialRating') || primary.lastElementChild;
-        if(ref && ref.parentNode === primary) primary.insertBefore(span, ref.nextSibling);
-        else primary.appendChild(span);
-    }
-    if (span.textContent !== content) span.textContent = content;
-
-    let icon = primary.querySelector('#mdbl-settings-trigger');
-    if (!icon) {
-        icon = document.createElement('div');
-        icon.id = 'mdbl-settings-trigger';
-        icon.title = 'Settings';
-        icon.innerHTML = `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>`;
-        
-        icon.onclick = (e) => {
-            e.preventDefault(); 
-            e.stopPropagation();
-            openSettingsMenu();
-        };
-
-        if (span.nextSibling) span.parentNode.insertBefore(icon, span.nextSibling);
-        else span.parentNode.appendChild(icon);
+        let span = primary.querySelector('#customEndsAt');
+        if (!span) {
+            span = document.createElement('div');
+            span.id = 'customEndsAt';
+            span.title = 'Calculated finish time';
+            const rc = primary.querySelector('.mdblist-rating-container');
+            if (rc && rc.nextSibling) primary.insertBefore(span, rc.nextSibling);
+            else primary.appendChild(span);
+        }
+        if (span.textContent !== content) span.textContent = content;
+        span.style.display = ''; 
+    } else {
+        const span = primary.querySelector('#customEndsAt');
+        if(span) span.remove();
     }
 }
 
@@ -364,11 +360,9 @@ function renderRatings(container, data, pageImdbId, type) {
         slug: data.slug || data.ids?.slug
     };
     
-    const traktType = type === 'show' ? 'shows' : 'movies';
-    const metaType = type === 'show' ? 'tv' : 'movie';
     const fallbackSlug = localSlug(data.title || '');
+    const metaType = type === 'show' ? 'tv' : 'movie';
 
-    // Master Rating Calculation
     let masterSum = 0;
     let masterCount = 0;
     const trackMaster = (val, scaleKey) => {
@@ -438,23 +432,26 @@ function renderRatings(container, data, pageImdbId, type) {
         });
     }
 
-    // --- MASTER RATING (DuckDuckGo "I'm Feeling Lucky" !ducky) ---
     if (masterCount > 0) {
         const average = masterSum / masterCount;
-        
         const safeTitle = encodeURIComponent(data.title || '');
         const safeYear = (data.year || '').toString();
         const suffix = type === 'movie' ? 'film' : 'TV series';
-        
-        // Use DuckDuckGo with !ducky to avoid Google Redirect Notice page
         const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${safeTitle}+${safeYear}+${suffix}`;
-
         add('master', average, wikiUrl, masterCount, 'Master Rating', 'Sources');
     }
+
+    html += `
+    <div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="event.preventDefault(); event.stopPropagation(); window.MDBL_OPEN_SETTINGS_GL();">
+       <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+    </div>
+    `;
 
     container.innerHTML = html;
     refreshDomElements();
 }
+
+window.MDBL_OPEN_SETTINGS_GL = () => openSettingsMenu();
 
 function fetchRatings(container, tmdbId, type) {
     const cacheKey = `${NS}c_${tmdbId}`;
@@ -483,14 +480,11 @@ function fetchRatings(container, tmdbId, type) {
 }
 
 function scan() {
-    // --- NAVIGATION GUARD (RECYCLING FIX) ---
     if (window.location.pathname !== lastPath) {
         lastPath = window.location.pathname;
         currentImdbId = null; 
-        // Force cleanup to allow re-injection on recycled pages
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
     }
-    // ----------------------------------------
 
     updateEndsAt();
 
@@ -513,12 +507,9 @@ function scan() {
             
             const wrapper = document.querySelector('.itemMiscInfo');
             if (wrapper) {
-                // Check if a container for THIS ID already exists
                 const existing = wrapper.querySelector(`.mdblist-rating-container[data-tmdb-id="${id}"]`);
                 if (!existing) {
-                    // Remove any OLD container (wrong ID)
                     wrapper.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
-
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
                     div.dataset.type = type;
@@ -554,10 +545,13 @@ function getJellyfinColor() {
 function initMenu() {
     if(document.getElementById('mdbl-panel')) return;
 
-    // Increased mdbl-right-col-wide to 340px to widen sliders
+    // Changes: 
+    // - New CSS class .mdbl-slider-row
+    // - Flexbox layout specifically for sliders
+    // - Removed compact toggle logic
     const css = `
-    :root { --mdbl-right-col: 48px; --mdbl-right-col-wide: 340px; }
-    #mdbl-panel { position:fixed; right:16px; bottom:70px; width:480px; max-height:90vh; overflow:auto; border-radius:14px;
+    :root { --mdbl-right-col: 48px; }
+    #mdbl-panel { position:fixed; right:16px; bottom:70px; width:500px; max-height:90vh; overflow:auto; border-radius:14px;
         border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px);
         color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
     #mdbl-panel header { position:sticky; top:0; background:rgba(22,22,26,0.98); padding:6px 12px; border-bottom:1px solid rgba(255,255,255,0.08);
@@ -568,31 +562,56 @@ function initMenu() {
         padding: 0; border-radius: 6px; 
     }
     #mdbl-close:hover { background:rgba(255,255,255,0.06); color:#fff; }
-    #mdbl-panel .mdbl-section { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+    #mdbl-panel .mdbl-section { padding:2px 12px; gap:2px; display:flex; flex-direction:column; }
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     
-    #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:10px; padding:8px 10px; border-radius:12px; }
-    #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); min-height: 48px; box-sizing:border-box; }
-    #mdbl-panel .mdbl-row.wide { grid-template-columns:1fr var(--mdbl-right-col-wide); }
+    #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
+    #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); box-sizing:border-box; }
+    
+    /* === NEW SLIDER LAYOUT CLASS === */
+    .mdbl-slider-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 15px;
+        padding: 4px 6px;
+        border-radius: 6px;
+        background: transparent; 
+        border: 1px solid rgba(255,255,255,0.06);
+        min-height: 32px;
+    }
+    .mdbl-slider-row > span { white-space: nowrap; width: 110px; flex-shrink: 0; }
+    .mdbl-slider-row .slider-wrapper {
+        flex-grow: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: flex-end;
+        width: 100%;
+    }
     
     /* Theme Sync */
     #mdbl-panel input[type="checkbox"] { 
         transform: scale(1.2); cursor: pointer; 
         accent-color: var(--mdbl-theme); 
     }
-    #mdbl-panel input[type="range"] { flex: 1; margin: 0 12px; cursor: pointer; accent-color: var(--mdbl-theme); }
+    #mdbl-panel input[type="range"] { 
+        flex-grow: 1; /* Force stretch */
+        width: 100%;  /* Ensure it fills flex container */
+        margin: 0; cursor: pointer; accent-color: var(--mdbl-theme); 
+    }
     
     #mdbl-panel input[type="text"] { width:100%; padding:10px 0; border:0; background:transparent; color:#eaeaea; font-size:14px; outline:none; }
     
     #mdbl-panel select, #mdbl-panel input.mdbl-pos-input, #mdbl-panel input.mdbl-num-input {
         padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea;
-        height:32px; line-height: 32px; box-sizing:border-box; display:inline-block; color-scheme: dark;
+        height:28px; line-height: 28px; font-size: 12px; box-sizing:border-box; display:inline-block; color-scheme: dark;
     }
     #mdbl-panel .mdbl-select { width:140px; justify-self:end; }
     #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
     #mdbl-panel input.mdbl-num-input { width: 60px; text-align: center; }
 
-    #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:12px 16px; border-top:1px solid rgba(255,255,255,0.08); }
+    #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:6px 10px; border-top:1px solid rgba(255,255,255,0.08); }
     #mdbl-panel button { padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
     
     /* Force Theme Color */
@@ -605,7 +624,7 @@ function initMenu() {
     #mdbl-sources { display:flex; flex-direction:column; gap:8px; }
     .mdbl-source { background:#0f1115; border:1px solid rgba(255,255,255,0.1); cursor: grab; }
     .mdbl-src-left { display:flex; align-items:center; gap:10px; }
-    .mdbl-src-left img { height:18px; width:auto; }
+    .mdbl-src-left img { height:16px; width:auto; }
     .mdbl-src-left .name { font-size:13px; }
     .mdbl-drag-handle { justify-self:start; opacity:0.6; cursor:grab; }
     #mdbl-key-box { background:#0f1115; border:1px solid rgba(255,255,255,0.1); padding:10px; border-radius:12px; }
@@ -616,26 +635,15 @@ function initMenu() {
     .mdbl-grid label { white-space: nowrap; }
     .sw { display:inline-block; width:18px; height:18px; border-radius:4px; border:1px solid rgba(255,255,255,0.25); }
     
-    #mdbl-panel hr { border:0; border-top:1px solid rgba(255,255,255,0.08); margin:10px 0; }
+    #mdbl-panel hr { border:0; border-top:1px solid rgba(255,255,255,0.08); margin:4px 0; }
     #mdbl-panel .mdbl-actions { display:flex; align-items:center; gap:8px; }
     #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
-    #mdbl-panel .mdbl-actions .mdbl-compact { display:inline-flex; align-items:center; gap:6px; opacity:0.95; }
-    
-    #mdbl-panel[data-compact="1"] { --mdbl-right-col:44px; --mdbl-right-col-wide:260px; width:460px; }
-    #mdbl-panel[data-compact="1"] header { padding:6px 12px; }
-    #mdbl-panel[data-compact="1"] .mdbl-section { padding:2px 12px; gap:2px; }
-    #mdbl-panel[data-compact="1"] .mdbl-row, #mdbl-panel[data-compact="1"] .mdbl-source { gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
-    #mdbl-panel[data-compact="1"] .mdbl-actions { padding:6px 10px; }
-    #mdbl-panel[data-compact="1"] .mdbl-src-left img { height:16px; }
-    #mdbl-panel[data-compact="1"] select, #mdbl-panel[data-compact="1"] input.mdbl-pos-input, #mdbl-panel[data-compact="1"] input.mdbl-num-input { height: 28px; font-size: 12px; line-height: 28px; }
-    #mdbl-panel[data-compact="1"] .mdbl-select { width: 140px; }
-    #mdbl-panel[data-compact="1"] hr { margin: 4px 0; }
 
     @media (max-width: 600px) {
-        #mdbl-panel, #mdbl-panel[data-compact="1"] {
+        #mdbl-panel {
             width: 96% !important; left: 2% !important; right: 2% !important; bottom: 10px !important; top: auto !important;
             transform: none !important; max-height: 80vh;
-            --mdbl-right-col: 40px; --mdbl-right-col-wide: 140px;
+            --mdbl-right-col: 40px; 
         }
         #mdbl-panel header { cursor: default; }
         #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { min-height: 42px; padding: 4px 8px; }
@@ -675,18 +683,27 @@ function initMenu() {
     
     // Fix: Close on click outside
     document.addEventListener('mousedown', (e) => {
-        if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('#mdbl-settings-trigger')) {
+        if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('.mdbl-settings-btn')) {
             panel.style.display = 'none';
         }
     });
-    
-    if(loadConfig().display.compactLevel) panel.setAttribute('data-compact', '1');
 }
 
 initMenu();
 
 function renderMenuContent(panel) {
-    const row = (label, input, wide) => `<div class="mdbl-row ${wide?'wide':''}"><span>${label}</span>${input}</div>`;
+    const row = (label, input) => `<div class="mdbl-row"><span>${label}</span>${input}</div>`;
+    
+    // NEW: Function specifically for the Wide Slider Rows
+    const sliderRow = (label, idRange, idNum, min, max, val) => `
+    <div class="mdbl-slider-row">
+        <span>${label}</span>
+        <div class="slider-wrapper">
+            <input type="range" id="${idRange}" min="${min}" max="${max}" value="${val}">
+            <input type="number" id="${idNum}" value="${val}" class="mdbl-pos-input">
+        </div>
+    </div>
+    `;
     
     let html = `
     <header>
@@ -699,7 +716,7 @@ function renderMenuContent(panel) {
     <div class="mdbl-section">
        <div class="mdbl-subtle">Sources (drag to reorder)</div>
        <div id="mdbl-sources"></div>
-       <hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0">
+       <hr>
     </div>
     <div class="mdbl-section" id="mdbl-sec-display">
         <div class="mdbl-subtle">Display</div>
@@ -708,22 +725,10 @@ function renderMenuContent(panel) {
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
         
-        <div class="mdbl-row wide">
-            <span>Position X (px)</span>
-            <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
-            <input type="range" id="d_x_rng" min="-500" max="500" value="${CFG.display.posX}">
-            <input type="number" id="d_x_num" value="${CFG.display.posX}" class="mdbl-pos-input">
-            </div>
-        </div>
-        <div class="mdbl-row wide">
-            <span>Position Y (px)</span>
-            <div class="grid-right" style="flex:1; display:flex; justify-content:flex-end; align-items:center; gap:8px;">
-            <input type="range" id="d_y_rng" min="-300" max="300" value="${CFG.display.posY}">
-            <input type="number" id="d_y_num" value="${CFG.display.posY}" class="mdbl-pos-input">
-            </div>
-        </div>
+        ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -500, 500, CFG.display.posX)}
+        ${sliderRow('Position Y (px)', 'd_y_rng', 'd_y_num', -400, 400, CFG.display.posY)}
 
-        <hr style="border:0;border-top:1px solid rgba(255,255,255,0.08);margin:12px 0">
+        <hr>
         
         <div class="mdbl-subtle">Color bands &amp; palette</div>
         <div class="mdbl-grid">
@@ -742,11 +747,6 @@ function renderMenuContent(panel) {
     <div class="mdbl-actions" style="padding-bottom:16px">
       <button id="mdbl-btn-reset">Reset</button>
       <button id="mdbl-btn-save" class="primary">Save & Apply</button>
-      <div class="mdbl-grow"></div>
-      <label class="mdbl-compact" for="mdbl-compact-toggle">
-        <span>Compact</span>
-        <input type="checkbox" id="mdbl-compact-toggle" ${CFG.display.compactLevel?'checked':''}>
-      </label>
     </div>
     `;
     
@@ -762,7 +762,7 @@ function renderMenuContent(panel) {
          div.innerHTML = `
             <div class="mdbl-src-left">
                 <span class="mdbl-drag-handle">⋮⋮</span>
-                <img src="${LOGO[k]||''}" style="height:18px">
+                <img src="${LOGO[k]||''}" style="height:16px">
                 <span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span>
             </div>
             <input type="checkbox" class="src-check" ${CFG.sources[k]?'checked':''}>
@@ -813,10 +813,6 @@ function renderMenuContent(panel) {
         });
     });
 
-    panel.querySelector('#mdbl-compact-toggle').addEventListener('change', (e) => {
-        panel.setAttribute('data-compact', e.target.checked ? '1':'0');
-    });
-
     let dragSrc = null;
     panel.querySelectorAll('.mdbl-src-row').forEach(row => {
         row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; });
@@ -837,7 +833,6 @@ function renderMenuContent(panel) {
     });
 
     panel.querySelector('#mdbl-btn-save').onclick = () => {
-        CFG.display.compactLevel = panel.querySelector('#mdbl-compact-toggle').checked ? 1 : 0;
         saveConfig();
         const ki = panel.querySelector('#mdbl-key-mdb');
         if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
