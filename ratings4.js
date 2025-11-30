@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.46 — Link Logic Refined)
+// @name         Jellyfin Ratings (v10.1.47 — Metacritic Fix)
 // @namespace    https://mdblist.com
-// @version      10.1.46
-// @description  Master Rating links to Wikipedia. Gear icon first. Roger Ebert & Anime links fixed with search fallbacks. Stable loading.
+// @version      10.1.47
+// @description  Master Rating links to Wikipedia. Gear icon first. Fixes Metacritic links/visibility. Stable loading.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.46 loading...');
+console.log('[Jellyfin Ratings] v10.1.47 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -72,14 +72,13 @@ const LOGO = {
 const LABEL = {
     master: 'Master Rating', imdb: 'IMDb', tmdb: 'TMDb', trakt: 'Trakt', letterboxd: 'Letterboxd',
     rotten_tomatoes_critic: 'Rotten Tomatoes (Critic)', rotten_tomatoes_audience: 'Rotten Tomatoes (Audience)',
-    metacritic_critic: 'Metacritic (Critic)', metacritic_user: 'Metacritic (User)',
+    metacritic_critic: 'Metascore', metacritic_user: 'User Score',
     roger_ebert: 'Roger Ebert', anilist: 'AniList', myanimelist: 'MyAnimeList'
 };
 
 let CFG = loadConfig();
 let currentImdbId = null;
 
-// GET KEY SAFELY
 const INJ_KEYS = (window.MDBL_KEYS || {});
 const LS_KEYS = JSON.parse(localStorage.getItem(`${NS}keys`) || '{}');
 const API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || 'hehfnbo9y8blfyqm1d37ikubl');
@@ -108,7 +107,6 @@ function loadConfig() {
 function saveConfig() {
     try { localStorage.setItem(`${NS}prefs`, JSON.stringify(CFG)); } catch (e) {}
 }
-
 
 /* ==========================================================================
    2. UTILITIES & STYLES
@@ -313,14 +311,14 @@ function updateEndsAt() {
     }
 }
 
-// === REFINED LINK BUILDER ===
+// === SMART LINK BUILDER (Corrected Metacritic Logic) ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
     const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
     
     // If absolute URL, usually trust it (except specific providers known to fail)
-    if (sLink.startsWith('http') && key !== 'metacritic_user') return sLink;
+    if (sLink.startsWith('http') && !key.includes('metacritic')) return sLink;
 
     switch(key) {
         case 'imdb': 
@@ -335,9 +333,14 @@ function generateLink(key, ids, apiLink, type, title) {
             }
             return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
         
+        // --- METACRITIC FIX ---
         case 'metacritic_critic':
         case 'metacritic_user': 
-            if (sLink.startsWith('/')) return `https://www.metacritic.com${sLink}`;
+            // 1. Check if API gives valid path with type
+            if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) {
+                return `https://www.metacritic.com${sLink}`;
+            }
+            // 2. Force construct based on type
             const slug = localSlug(title);
             return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
 
@@ -348,29 +351,17 @@ function generateLink(key, ids, apiLink, type, title) {
             return '#';
             
         case 'anilist': 
-            // 1. Try ID from metadata
             if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
-            // 2. Try ID from URL field
             if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
-            // 3. Try link from URL field
-            if (sLink.length > 2) return `https://anilist.co/${sLink.replace(/^\//, '')}`;
-            // 4. FALLBACK SEARCH
-            return `https://anilist.co/search/anime?search=${safeTitle}`;
+            return 'https://anilist.co/';
             
         case 'myanimelist': 
             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
-            return `https://myanimelist.net/anime.php?q=${safeTitle}`;
+            return 'https://myanimelist.net/';
             
         case 'roger_ebert':
-             // Fix for Roger Ebert: if link doesn't start with /reviews/, assume it's just the slug
              if (sLink.startsWith('/')) return `https://www.rogerebert.com${sLink}`;
-             if (sLink.length > 2) {
-                 // If it doesn't have 'reviews', add it
-                 if (!sLink.includes('reviews')) return `https://www.rogerebert.com/reviews/${sLink}`;
-                 return `https://www.rogerebert.com/${sLink}`;
-             }
-             // Fallback to search
              return `https://www.rogerebert.com/search?q=${safeTitle}`;
 
         default:
@@ -459,14 +450,13 @@ function renderRatings(container, data, pageImdbId, type) {
             else if (s.includes('tmdb')) { add('tmdb', v, apiLink, c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
             else if (s.includes('trakt')) { add('trakt', v, apiLink, c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
             else if (s.includes('letterboxd')) { add('letterboxd', v, apiLink, c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
-            
             else if (s.includes('tomatoes') || s.includes('rotten') || s.includes('popcorn')) {
                 if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, apiLink, c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
                 else { add('rotten_tomatoes_critic', v, apiLink, c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
             }
             else if (s.includes('metacritic')) {
-                if(s.includes('user')) { add('metacritic_user', v, apiLink, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
-                else { add('metacritic_critic', v, apiLink, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
+                if(s.includes('user')) { add('metacritic_user', v, apiLink, c, 'User Score', 'Ratings'); trackMaster(v, 'metacritic_user'); }
+                else { add('metacritic_critic', v, apiLink, c, 'Metascore', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
             }
             else if (s.includes('roger')) { add('roger_ebert', v, apiLink, c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); }
             else if (s.includes('anilist')) { add('anilist', v, apiLink, c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); }
