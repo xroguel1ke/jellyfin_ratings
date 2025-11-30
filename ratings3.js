@@ -1,22 +1,19 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.36 — Type Safety Fix)
+// @name         Jellyfin Ratings (v10.1.37 — Link Gen & Hard Reset)
 // @namespace    https://mdblist.com
-// @version      10.1.36
-// @description  Master Rating links to Wikipedia. Gear icon first. Fixes "startsWith" crash on numeric URLs.
+// @version      10.1.37
+// @description  Master Rating links to Wikipedia. Gear icon first. Hides default ratings. Generates clean links internally. Hard resets on nav to fix stale data.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.36 loading...');
+console.log('[Jellyfin Ratings] v10.1.37 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
 ========================================================================== */
 
 const NS = 'mdbl_';
-// DEFAULT KEY - If this is overused, you might get errors.
-const DEFAULT_KEY = 'hehfnbo9y8blfyqm1d37ikubl'; 
-
 const DEFAULTS = {
     sources: {
         master: true, imdb: true, tmdb: true, trakt: true, letterboxd: true,
@@ -85,7 +82,7 @@ let currentImdbId = null;
 // GET KEY SAFELY
 const INJ_KEYS = (window.MDBL_KEYS || {});
 const LS_KEYS = JSON.parse(localStorage.getItem(`${NS}keys`) || '{}');
-const API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || DEFAULT_KEY);
+const API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || 'hehfnbo9y8blfyqm1d37ikubl');
 
 function loadConfig() {
     try {
@@ -222,15 +219,6 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
-function fixUrl(url, domain) {
-    if (!url) return null;
-    // FIX: Ensure url is a string before checking
-    const strUrl = String(url);
-    if (strUrl.startsWith('http')) return strUrl;
-    const clean = strUrl.startsWith('/') ? strUrl.substring(1) : strUrl;
-    return `https://${domain}/${clean}`;
-}
-
 function openSettingsMenu() {
     initMenu();
     const p = document.getElementById('mdbl-panel');
@@ -318,6 +306,25 @@ function updateEndsAt() {
     }
 }
 
+// FIX 1: Robust Link Generator (Ignores garbage API URLs)
+function generateRatingLink(key, idData, apiLink, type) {
+    const fallbackSlug = localSlug(document.title || ''); // Fallback slug
+    
+    switch(key) {
+        case 'imdb': return idData.imdb ? `https://www.imdb.com/title/${idData.imdb}/` : '#';
+        case 'tmdb': return idData.tmdb ? `https://www.themoviedb.org/${type}/${idData.tmdb}` : '#';
+        case 'trakt': return idData.trakt ? `https://trakt.tv/${type}s/${idData.trakt}` : (idData.imdb ? `https://trakt.tv/search/imdb/${idData.imdb}` : '#');
+        case 'letterboxd': return (apiLink && apiLink.includes('/film/')) ? `https://letterboxd.com${apiLink}` : (idData.imdb ? `https://letterboxd.com/imdb/${idData.imdb}/` : '#');
+        case 'rotten_tomatoes_critic':
+        case 'rotten_tomatoes_audience': return (apiLink && apiLink.startsWith('/')) ? `https://www.rottentomatoes.com${apiLink}` : '#';
+        case 'metacritic_critic':
+        case 'metacritic_user': return (apiLink && apiLink.startsWith('/')) ? `https://www.metacritic.com${apiLink}` : '#';
+        case 'anilist': return (apiLink && apiLink.startsWith('http')) ? apiLink : 'https://anilist.co/';
+        case 'myanimelist': return (apiLink && apiLink.startsWith('http')) ? apiLink : 'https://myanimelist.net/';
+        default: return (apiLink && apiLink.startsWith('http')) ? apiLink : '#';
+    }
+}
+
 function createRatingHtml(key, val, link, count, title, kind) {
     if (val === null || isNaN(val)) return '';
     if (!LOGO[key]) return '';
@@ -325,22 +332,8 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const r = Math.round(n);
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
-    // FIX: Type checking on link
-    let safeLink = '#';
-    if (link && link !== '#') {
-        let sLink = String(link);
-        if (!sLink.startsWith('http')) {
-           // Specific handlers could go here but default is #
-           if (sLink.length > 0 && sLink !== '0') {
-               // Just let it fallback to # if numeric or weird
-           }
-        } else {
-           safeLink = sLink;
-        }
-    }
-    
-    const style = safeLink === '#' ? 'cursor:default;' : '';
-    return `<a href="${safeLink}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
+    const style = (!link || link === '#') ? 'cursor:default;' : '';
+    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
 }
 
 function renderGearIcon(container, statusText = '') {
@@ -376,9 +369,6 @@ function updateStatus(container, text, color = '#ffeb3b') {
 }
 
 function renderRatings(container, data, pageImdbId, type) {
-    // DEBUG
-    console.log('[MDBList] Data received:', data);
-
     const btn = container.querySelector('.mdbl-settings-btn');
     container.innerHTML = ''; 
     
@@ -388,10 +378,13 @@ function renderRatings(container, data, pageImdbId, type) {
     } else renderGearIcon(container, '');
 
     let html = '';
-    const add = (k, v, lnk, cnt, tit, kind) => html += createRatingHtml(k, v, lnk, cnt, tit, kind);
     const ids = { imdb: data.imdbid || data.imdb_id || pageImdbId, tmdb: data.id || data.tmdbid || data.tmdb_id, trakt: data.traktid || data.trakt_id, slug: data.slug || data.ids?.slug };
-    const fallbackSlug = localSlug(data.title || '');
-    const metaType = type === 'show' ? 'tv' : 'movie';
+    const add = (k, v, apiLink, c, tit, kind) => {
+        // Generate robust link here
+        const robustLink = generateRatingLink(k, ids, apiLink, type);
+        html += createRatingHtml(k, v, robustLink, c, tit, kind);
+    };
+
     let masterSum = 0, masterCount = 0;
     const trackMaster = (val, scaleKey) => { if (val !== null && !isNaN(parseFloat(val))) { masterSum += parseFloat(val) * (SCALE[scaleKey] || 1); masterCount++; } };
 
@@ -399,28 +392,27 @@ function renderRatings(container, data, pageImdbId, type) {
         data.ratings.forEach(r => {
             const s = (r.source || '').toLowerCase();
             const v = r.value, c = r.votes || r.count, apiLink = r.url;
-            if (s.includes('imdb')) { add('imdb', v, ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : apiLink, c, 'IMDb', 'Votes'); trackMaster(v, 'imdb'); }
-            else if (s.includes('tmdb')) { add('tmdb', v, ids.tmdb ? `https://www.themoviedb.org/${type}/${ids.tmdb}` : '#', c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
-            else if (s.includes('trakt')) { add('trakt', v, ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#', c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
-            else if (s.includes('letterboxd')) { add('letterboxd', v, ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : fixUrl(apiLink, 'letterboxd.com'), c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
+            if (s.includes('imdb')) { add('imdb', v, apiLink, c, 'IMDb', 'Votes'); trackMaster(v, 'imdb'); }
+            else if (s.includes('tmdb')) { add('tmdb', v, apiLink, c, 'TMDb', 'Votes'); trackMaster(v, 'tmdb'); }
+            else if (s.includes('trakt')) { add('trakt', v, apiLink, c, 'Trakt', 'Votes'); trackMaster(v, 'trakt'); }
+            else if (s.includes('letterboxd')) { add('letterboxd', v, apiLink, c, 'Letterboxd', 'Votes'); trackMaster(v, 'letterboxd'); }
             else if (s.includes('tomatoes') || s.includes('rotten')) {
-                if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
-                else { add('rotten_tomatoes_critic', v, fixUrl(apiLink, 'rottentomatoes.com'), c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
+                if(s.includes('audience') || s.includes('popcorn')) { add('rotten_tomatoes_audience', v, apiLink, c, 'RT Audience', 'Ratings'); trackMaster(v, 'rotten_tomatoes_audience'); }
+                else { add('rotten_tomatoes_critic', v, apiLink, c, 'RT Critic', 'Reviews'); trackMaster(v, 'rotten_tomatoes_critic'); }
             }
             else if (s.includes('metacritic')) {
-                const lnk = fallbackSlug ? `https://www.metacritic.com/${metaType}/${fallbackSlug}` : `https://www.metacritic.com/search/all/${encodeURIComponent(data.title||'')}/results`;
-                if(s.includes('user')) { add('metacritic_user', v, lnk, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
-                else { add('metacritic_critic', v, lnk, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
+                if(s.includes('user')) { add('metacritic_user', v, apiLink, c, 'User', 'Ratings'); trackMaster(v, 'metacritic_user'); }
+                else { add('metacritic_critic', v, apiLink, c, 'Metacritic', 'Reviews'); trackMaster(v, 'metacritic_critic'); }
             }
-            else if (s.includes('roger')) { add('roger_ebert', v, fixUrl(apiLink, 'rogerebert.com'), c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); }
-            else if (s.includes('anilist')) { add('anilist', v, fixUrl(apiLink, 'anilist.co'), c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); }
-            else if (s.includes('myanimelist')) { add('myanimelist', v, fixUrl(apiLink, 'myanimelist.net'), c, 'MAL', 'Votes'); trackMaster(v, 'myanimelist'); }
+            else if (s.includes('roger')) { add('roger_ebert', v, apiLink, c, 'Roger Ebert', 'Reviews'); trackMaster(v, 'roger_ebert'); }
+            else if (s.includes('anilist')) { add('anilist', v, apiLink, c, 'AniList', 'Votes'); trackMaster(v, 'anilist'); }
+            else if (s.includes('myanimelist')) { add('myanimelist', v, apiLink, c, 'MAL', 'Votes'); trackMaster(v, 'myanimelist'); }
         });
         
         if (masterCount > 0) {
             const avg = masterSum / masterCount;
             const wikiUrl = `https://duckduckgo.com/?q=!ducky+site:en.wikipedia.org+${encodeURIComponent(data.title || '')}+${(data.year || '')}+${type === 'movie' ? 'film' : 'TV series'}`;
-            add('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
+            html += createRatingHtml('master', avg, wikiUrl, masterCount, 'Master Rating', 'Sources');
         }
         
         const contentDiv = document.createElement('span');
@@ -433,7 +425,6 @@ function renderRatings(container, data, pageImdbId, type) {
 
         refreshDomElements();
     } else {
-        // EXPLICITLY SHOW NO DATA
         updateStatus(container, 'MDB: 0 Ratings', '#e53935');
     }
 }
@@ -452,14 +443,13 @@ function fetchRatings(container, id, type, apiMode) {
     } catch(e) {}
 
     container.dataset.fetching = 'true';
-    updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
+    updateStatus(container, 'Fetching...');
     
     GM_xmlhttpRequest({
         method: 'GET', url: apiUrl,
         onload: r => {
             container.dataset.fetching = 'false';
             if (r.status !== 200) { 
-                console.error('[MDBList] API Error:', r.status);
                 updateStatus(container, `API ${r.status}`, '#e53935');
                 return;
             }
@@ -467,14 +457,10 @@ function fetchRatings(container, id, type, apiMode) {
                 const d = JSON.parse(r.responseText);
                 localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
                 renderRatings(container, d, currentImdbId, type);
-            } catch(e) { 
-                console.error('[MDBList] Parse Error', e); 
-                updateStatus(container, 'Parse Err', '#e53935');
-            }
+            } catch(e) { updateStatus(container, 'Parse Err', '#e53935'); }
         },
         onerror: e => { 
             container.dataset.fetching = 'false'; 
-            console.error('[MDBList] Net Error', e); 
             updateStatus(container, 'Net Err', '#e53935');
         }
     });
@@ -486,7 +472,7 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === ROBUST ID HUNTER (DOM ONLY - RESTORED v10.1.23 LOGIC) ===
+// === FIX 2: HARD RESET STATE ON URL CHANGE ===
 
 function scan() {
     updateEndsAt();
@@ -505,7 +491,7 @@ function scan() {
         renderGearIcon(container, 'Scanning...');
         container.dataset.retries = 0; 
     } else if (container.dataset.jellyfinId !== currentJellyfinId) {
-        // Reset Logic on Navigation
+        // ID changed? Nuke it immediately.
         container.innerHTML = '';
         renderGearIcon(container, 'Scanning...');
         container.dataset.jellyfinId = currentJellyfinId;
@@ -517,13 +503,8 @@ function scan() {
 
     if (container.dataset.fetched === 'true') return;
 
-    // Retry Logic
     let retries = parseInt(container.dataset.retries || '0');
-    if (retries > 50) {
-        const st = container.querySelector('.mdbl-status-text');
-        if (st && container.dataset.fetched !== 'true' && !st.textContent.includes('Ratings')) {
-             updateStatus(container, 'No ID', '#e53935');
-        }
+    if (retries > 50) { // Stop after 25s
         return;
     }
     container.dataset.retries = retries + 1;
