@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.51 — Marker Strategy)
+// @name         Jellyfin Ratings (v10.1.52 — Marker & Dynamic)
 // @namespace    https://mdblist.com
-// @version      10.1.51
-// @description  Master Rating links to Wikipedia. Gear icon first. Uses DOM element marking for reliable page transition detection (like reference script). Keeps all link fixes.
+// @version      10.1.52
+// @description  Master Rating links. Gear icon first. Dynamic Icons (Rotten/Fresh). Marker-based scanning for perfect loading. Ratings placement adjusted.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.51 loading...');
+console.log('[Jellyfin Ratings] v10.1.52 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -23,6 +23,7 @@ const DEFAULTS = {
     },
     display: {
         showPercentSymbol: true, colorNumbers: true, colorIcons: false,
+        dynamicIcons: true, // New Toggle
         posX: 0, posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
@@ -60,6 +61,7 @@ const PALETTE_NAMES = {
 const CACHE_DURATION_API = 24 * 60 * 60 * 1000;
 const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
 
+// Standard Logos
 const LOGO = {
     master: `${ICON_BASE}/master.png`, imdb: `${ICON_BASE}/IMDb.png`, tmdb: `${ICON_BASE}/TMDB.png`,
     trakt: `${ICON_BASE}/Trakt.png`, letterboxd: `${ICON_BASE}/letterboxd.png`, anilist: `${ICON_BASE}/anilist.png`,
@@ -67,6 +69,12 @@ const LOGO = {
     rotten_tomatoes_critic: `${ICON_BASE}/Rotten_Tomatoes.png`,
     rotten_tomatoes_audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
     metacritic_critic: `${ICON_BASE}/Metacritic.png`, metacritic_user: `${ICON_BASE}/mus2.png`
+};
+
+// Dynamic Logos (Rotten/Fresh) - Names match reference script
+const DYNAMIC_LOGO = {
+    tomatoes_rotten: `${ICON_BASE}/Rotten_Tomatoes_rotten.png`,
+    audience_rotten: `${ICON_BASE}/Rotten_Tomatoes_negative_audience.png`
 };
 
 const LABEL = {
@@ -89,13 +97,8 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
-            p.display.posX = 0; p.display.posY = 0;
-        }
-        if (p.display.posX > 500) p.display.posX = 500;
-        if (p.display.posX < -700) p.display.posX = -700;
-        if (p.display.posY > 500) p.display.posY = 500;
-        if (p.display.posY < -500) p.display.posY = -500;
+        // Ensure new defaults exist
+        if(typeof p.display.dynamicIcons === 'undefined') p.display.dynamicIcons = DEFAULTS.display.dynamicIcons;
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
@@ -135,10 +138,9 @@ function updateGlobalStyles() {
 
     let rules = `
         .mdblist-rating-container {
-            display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; 
-            width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
-            box-sizing: border-box;
+            display: inline-flex; flex-wrap: wrap; align-items: center;
+            /* Positioned relative to flow, no longer absolute forced right */
+            margin-left: 14px;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
             z-index: 2147483647; position: relative; 
             pointer-events: auto !important; 
@@ -170,9 +172,15 @@ function updateGlobalStyles() {
         }
 
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
-        #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; }
         
-        .mediaInfoOfficialRating { display: inline-flex !important; margin-right: 14px; }
+        /* Ensure Custom Ends At fits inline */
+        #customEndsAt { 
+            font-size: inherit; opacity: 0.9; cursor: default; 
+            margin-left: 14px; display: inline-block; padding: 2px 4px;
+            margin-right: 0px; /* Reset */
+        }
+        
+        .mediaInfoOfficialRating { display: inline-flex !important; }
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
     `;
 
@@ -219,6 +227,7 @@ updateGlobalStyles();
    3. MAIN LOGIC
 ========================================================================== */
 
+// v10.1.12 Logic for URL fixing
 function fixUrl(url, domain) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
@@ -301,8 +310,9 @@ function updateEndsAt() {
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
+            // Insert BEFORE ratings container to maintain order: Official -> Ends At -> Ratings
             const rc = primary.querySelector('.mdblist-rating-container');
-            if (rc && rc.nextSibling) primary.insertBefore(span, rc.nextSibling);
+            if (rc) primary.insertBefore(span, rc); // Insert before ratings
             else primary.appendChild(span);
         }
         span.textContent = `Ends at ${timeStr}`;
@@ -313,25 +323,32 @@ function updateEndsAt() {
     }
 }
 
-// === LINK LOGIC (v10.1.50 Style) ===
+// === LINK BUILDER (Mixed v12 logic for Ebert, Smart for others) ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
-    const safeTitle = encodeURIComponent(title || '');
-    const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
     
     if (sLink.startsWith('http') && key !== 'metacritic_user' && key !== 'roger_ebert') return sLink;
 
     switch(key) {
         case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
-        case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        case 'trakt': return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
-        case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
+        case 'tmdb': 
+            const safeType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
+            return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
+        case 'trakt': 
+            const tType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
+            return ids.trakt ? `https://trakt.tv/${tType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        case 'letterboxd': 
+            if (sLink.includes('/film/') || sLink.includes('/slug/')) {
+                return `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}`;
+            }
+            return ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#';
         
         case 'metacritic_critic':
         case 'metacritic_user': 
             if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) return `https://www.metacritic.com${sLink}`;
             const slug = localSlug(title);
-            return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
+            const mType = (type === 'show' || type === 'tv') ? 'tv' : 'movie';
+            return slug ? `https://www.metacritic.com/${mType}/${slug}` : '#';
 
         case 'rotten_tomatoes_critic':
         case 'rotten_tomatoes_audience': 
@@ -342,24 +359,20 @@ function generateLink(key, ids, apiLink, type, title) {
         case 'anilist': 
             if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
             if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
-            return `https://anilist.co/search/anime?search=${safeTitle}`;
+            // Fallback to search
+            return `https://anilist.co/search/anime?search=${encodeURIComponent(title||'')}`;
             
         case 'myanimelist': 
             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
-            return `https://myanimelist.net/anime.php?q=${safeTitle}`;
+            return `https://myanimelist.net/anime.php?q=${encodeURIComponent(title||'')}`;
             
         case 'roger_ebert':
-             // Logic from v10.1.12 / 10.1.48
-             if (sLink && sLink.length > 2 && sLink !== '#') {
-                 if (sLink.startsWith('http')) return sLink;
-                 let path = sLink.startsWith('/') ? sLink : `/${sLink}`;
-                 if (!path.includes('/reviews/')) path = `/reviews${path}`;
-                 return `https://www.rogerebert.com${path}`;
-             }
-             return `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}`;
+             // v10.1.12 Logic requested
+             return fixUrl(sLink, 'rogerebert.com');
 
-        default: return '#';
+        default:
+            return '#';
     }
 }
 
@@ -370,8 +383,15 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const r = Math.round(n);
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
+    // DYNAMIC ICON LOGIC
+    let currentLogo = LOGO[key];
+    if (CFG.display.dynamicIcons) {
+        if (key === 'rotten_tomatoes_critic' && r < 60) currentLogo = DYNAMIC_LOGO.tomatoes_rotten;
+        else if (key === 'rotten_tomatoes_audience' && r < 60) currentLogo = DYNAMIC_LOGO.audience_rotten;
+    }
+
     const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
+    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${currentLogo}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
 }
 
 function renderGearIcon(container, statusText = '') {
@@ -518,51 +538,35 @@ function fetchRatings(container, id, type, apiMode) {
     });
 }
 
-function getJellyfinId() {
-    const url = window.location.hash || window.location.search;
-    const params = new URLSearchParams(url.includes('?') ? url.split('?')[1] : url);
-    return params.get('id');
-}
-
-// === SCANNER LOGIC (MARKER STRATEGY) ===
+// === MARKER-BASED SCANNER (From Ref Script) ===
 function scan() {
     updateEndsAt();
     
-    // Strategy: Find unprocessed TMDB/IMDb links in the DOM
-    // We use a data attribute to mark them so we don't re-process endlessly
-    // But if the link is destroyed/recreated (page nav), we catch it again.
-    
-    // 1. Look for TMDB links (Preferred)
-    const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
-    if (tmdbLinks.length > 0) {
-        const link = tmdbLinks[0]; // Take the first one
-        link.dataset.mdblProcessed = "true";
+    // Scan TMDB links
+    document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])').forEach(link => {
+        link.dataset.mdblProcessed = "true"; // Mark as handled
         
         const m = link.href.match(/\/(movie|tv)\/(\d+)/);
         if (m) {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
             injectContainer(id, type, 'tmdb');
-            return; // Done for this cycle
         }
-    }
-
-    // 2. Look for IMDb links (Fallback)
-    const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
-    if (imdbLinks.length > 0) {
-        const link = imdbLinks[0];
+    });
+    
+    // Scan IMDb links (Fallback)
+    document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])').forEach(link => {
         link.dataset.mdblProcessed = "true";
         
         const m = link.href.match(/tt\d+/);
         if (m) {
-            injectContainer(m[0], 'movie', 'imdb'); // Default to movie for imdb if unknown
-            return;
+            injectContainer(m[0], 'movie', 'imdb');
         }
-    }
+    });
 }
 
 function injectContainer(id, type, apiMode) {
-    // Find the right place to inject (First visible itemMiscInfo)
+    // Find visible wrapper
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
     for (const el of allWrappers) {
@@ -570,17 +574,32 @@ function injectContainer(id, type, apiMode) {
     }
     if (!wrapper) return;
 
-    // Clean up OLD container if it exists in this wrapper (from previous page)
-    const oldContainer = wrapper.querySelector('.mdblist-rating-container');
-    if (oldContainer) oldContainer.remove();
-
-    const container = document.createElement('div');
-    container.className = 'mdblist-rating-container';
-    container.dataset.tmdbId = id; // Mark with ID
-    wrapper.appendChild(container);
+    // Placement Strategy: After Official Rating
+    let target = wrapper.querySelector('.mediaInfoOfficialRating');
+    // If no official rating, try to place at end of wrapper
     
-    renderGearIcon(container, 'Loading...');
-    fetchRatings(container, id, type, apiMode);
+    let container = wrapper.querySelector('.mdblist-rating-container');
+    // If container exists but ID changed (or recycled), wipe it
+    if (container && container.dataset.tmdbId !== id) {
+        container.remove();
+        container = null;
+    }
+
+    if (!container) {
+        container = document.createElement('div');
+        container.className = 'mdblist-rating-container';
+        container.dataset.tmdbId = id;
+        
+        if (target) {
+            // Insert after Official Rating
+            target.parentNode.insertBefore(container, target.nextSibling);
+        } else {
+            wrapper.appendChild(container);
+        }
+        
+        renderGearIcon(container, 'Loading...');
+        fetchRatings(container, id, type, apiMode);
+    }
 }
 
 setInterval(scan, 500);
@@ -691,6 +710,7 @@ function renderMenuContent(panel) {
         <div class="mdbl-subtle">Display</div>
         ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
         ${row('Color icons', `<input type="checkbox" id="d_cicon" ${CFG.display.colorIcons?'checked':''}>`)}
+        ${row('Dynamic Icons', `<input type="checkbox" id="d_dyn" ${CFG.display.dynamicIcons?'checked':''}>`)}
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
         ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -700, 500, CFG.display.posX)}
@@ -740,6 +760,7 @@ function renderMenuContent(panel) {
     const updateLiveAll = () => {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
         CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
+        CFG.display.dynamicIcons = panel.querySelector('#d_dyn').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
         CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; 
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
