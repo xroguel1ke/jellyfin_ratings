@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.2.2 — Menu & Parental Fix)
+// @name         Jellyfin Ratings (v10.2.3 — Spacing & Click Fix)
 // @namespace    https://mdblist.com
-// @version      10.2.2
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Parental Rating restored. Menu click fixed.
+// @version      10.2.3
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Fixed Menu opening. Fixed Parental Rating spacing.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.2 loading...');
+console.log('[Jellyfin Ratings] v10.2.3 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -90,7 +90,7 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        // Force clamp limits on load: X(-700, 500), Y(-500, 500)
+        // Force clamp limits on load
         if(p.display) {
             p.display.posX = Math.max(-700, Math.min(500, parseInt(p.display.posX) || 0));
             p.display.posY = Math.max(-500, Math.min(500, parseInt(p.display.posY) || 0));
@@ -106,6 +106,7 @@ function loadConfig() {
 
 function saveConfig() { localStorage.setItem(`${NS}prefs`, JSON.stringify(CFG)); }
 
+// Polyfill GM_xmlhttpRequest if needed
 if (typeof GM_xmlhttpRequest === 'undefined') {
     const PROXIES = ['https://api.allorigins.win/raw?url=', 'https://api.codetabs.com/v1/proxy?quest='];
     window.GM_xmlhttpRequest = ({ method = 'GET', url, onload, onerror }) => {
@@ -148,12 +149,19 @@ const CSS_MAIN = `
     .itemMiscInfo, .mainDetailRibbon, .detailRibbon { 
         overflow: visible !important; contain: none !important; position: relative; z-index: 10; 
     }
+    
+    /* Spacing Fixes */
     #customEndsAt { 
         font-size: inherit; opacity: 0.9; cursor: default; 
-        margin-left: 10px; display: inline-block; vertical-align: baseline;
+        margin-left: 0 !important; display: inline-block; vertical-align: baseline;
         pointer-events: auto; position: relative; z-index: 9999; padding: 2px 4px;
     }
-    /* Hide Default Jellyfin Ratings (But keep Parental Rating .mediaInfoOfficialRating visible) */
+    .mediaInfoOfficialRating { 
+        margin-right: 10px !important; /* Force spacing after Parental Rating */
+        display: inline-block !important; /* Ensure it respects margins */
+    }
+
+    /* Hide Default Jellyfin Ratings */
     .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating {
         display: none !important;
     }
@@ -185,6 +193,7 @@ const CSS_MENU = `
     #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
     #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); box-sizing:border-box; }
     
+    /* Flexbox Slider Row */
     .mdbl-slider-row {
         display: flex; align-items: center; justify-content: space-between; gap: 15px;
         padding: 4px 6px; border-radius: 6px; background: transparent; 
@@ -268,9 +277,6 @@ function refreshDomElements() {
    4. CORE LOGIC
 ========================================================================== */
 
-// Define global function immediately
-window.MDBL_OPEN_SETTINGS_GL = () => { initMenu(); if(window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS(); };
-
 function parseRuntimeToMinutes(text) {
     if (!text) return 0;
     let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
@@ -337,8 +343,8 @@ function createRatingHtml(key, val, link, count, title) {
 }
 
 function renderRatings(container, data, pageImdbId, type) {
-    // Gear Icon
-    let html = `<div class="mdbl-rating-item mdbl-settings-btn" title="Settings" onclick="window.MDBL_OPEN_SETTINGS_GL()">
+    // Removed inline onclick, relies on global event listener below
+    let html = `<div class="mdbl-rating-item mdbl-settings-btn" title="Settings">
        <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg></div>`;
 
     const ids = { imdb: data.imdbid||data.imdb_id||pageImdbId, tmdb: data.id||data.tmdbid||container.dataset.tmdbId, trakt: data.traktid };
@@ -373,6 +379,15 @@ function renderRatings(container, data, pageImdbId, type) {
     container.innerHTML = html;
     refreshDomElements();
 }
+
+// Global Event Listener for Menu (Fixes click issues in Sandboxes)
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.mdbl-settings-btn')) {
+        e.preventDefault(); e.stopPropagation();
+        initMenu(); 
+        if(window.MDBL_OPEN_SETTINGS) window.MDBL_OPEN_SETTINGS();
+    }
+});
 
 function fetchRatings(container, tmdbId, type) {
     const cacheKey = `${NS}c_${tmdbId}`;
