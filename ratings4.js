@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.15 — Hybrid Burst)
+// @name         Jellyfin Ratings (v10.1.16 — The Enforcer)
 // @namespace    https://mdblist.com
-// @version      10.1.15
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Hybrid Engine (Observer + Burst).
+// @version      10.1.16
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Force-loads ratings on navigation.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.15 loading...');
+console.log('[Jellyfin Ratings] v10.1.16 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -171,7 +171,7 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; transition: filter 0.2s; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; transition: color 0.2s; }
         
-        /* Settings Button */
+        /* Settings Button - Forced first via order */
         .mdbl-settings-btn {
             opacity: 0.6; margin-right: 8px; border-right: 1px solid rgba(255,255,255,0.2); 
             padding: 4px 8px 4px 0;
@@ -294,7 +294,7 @@ function parseRuntimeToMinutes(text) {
 
 function updateEndsAt() {
     const primary = document.querySelector('.itemMiscInfo.itemMiscInfo-primary') || document.querySelector('.itemMiscInfo');
-    if (!primary) return;
+    if (!primary || !document.body.contains(primary)) return; // Valid check
 
     let minutes = 0;
     const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
@@ -314,7 +314,7 @@ function updateEndsAt() {
     document.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
         if (el.id === 'customEndsAt') return;
         if (el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
-        if (el.classList.contains('mediaInfoOfficialRating')) return;
+        if (el.classList.contains('mediaInfoOfficialRating')) return; // PROTECT PARENTAL RATING
         
         const t = (el.textContent || '').toLowerCase();
         if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
@@ -496,43 +496,40 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// === HYBRID ENGINE: OBSERVER + BURST NAVIGATION ===
+// === THE ENFORCER: RECURSIVE CHECKER ===
 
-// 1. Mutation Observer (Instant updates)
-let debounceTimer = null;
-const observer = new MutationObserver(() => {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => scan(), 50);
-});
-observer.observe(document.body, { childList: true, subtree: true });
-
-// 2. Navigation Burst Logic (Aggressive reload on URL change)
+let enforcerInterval = null;
 let lastPath = window.location.pathname;
-let burstInterval = null;
 
-function burstScan() {
-    scan();
-    if(burstInterval) clearInterval(burstInterval);
-    let count = 0;
-    // Scan every 100ms for 3 seconds (30 checks)
-    burstInterval = setInterval(() => {
+function startEnforcement() {
+    if(enforcerInterval) clearInterval(enforcerInterval);
+    let checks = 0;
+    // Check every 100ms for 5 seconds
+    enforcerInterval = setInterval(() => {
         scan();
-        count++;
-        if(count > 30) clearInterval(burstInterval);
+        checks++;
+        if(checks > 50) clearInterval(enforcerInterval);
     }, 100);
 }
 
-// 3. Heartbeat (Fail-safe, checks periodically)
-setInterval(() => {
-    // Check if URL changed manually (SPA router detection)
+// Global Observer to trigger enforcement on DOM changes
+const observer = new MutationObserver(() => {
+    // If the path changed, reset completely
     if (window.location.pathname !== lastPath) {
         lastPath = window.location.pathname;
         currentImdbId = null;
         document.querySelectorAll('.mdblist-rating-container').forEach(e => e.remove());
-        burstScan(); // Trigger Burst
+        startEnforcement();
+    } else {
+        // If path is same but DOM changed, just scan once lightly, 
+        // unless we suspect a full wipe, then trigger enforcement manually.
+        scan();
     }
-    scan(); // Regular Heartbeat scan
-}, 2000);
+});
+observer.observe(document.body, { childList: true, subtree: true });
+
+// Initial kick
+startEnforcement();
 
 function scan() {
     updateEndsAt();
@@ -549,9 +546,11 @@ function scan() {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
             
+            // Only proceed if wrapper exists AND is attached to DOM
             const wrapper = document.querySelector('.itemMiscInfo');
-            if (wrapper) {
+            if (wrapper && document.body.contains(wrapper)) {
                 const existing = wrapper.querySelector('.mdblist-rating-container');
+                
                 if (!existing) {
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
@@ -561,6 +560,7 @@ function scan() {
                     fetchRatings(div, id, type);
                 } 
                 else if (existing.dataset.tmdbId !== id) {
+                    // ID mismatch (navigated from movie A to B fast)
                     existing.remove();
                     const div = document.createElement('div');
                     div.className = 'mdblist-rating-container';
