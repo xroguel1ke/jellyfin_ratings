@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.20 — Visibility Targeting)
+// @name         Jellyfin Ratings (v10.1.21 — Global ID Search)
 // @namespace    https://mdblist.com
-// @version      10.1.20
-// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Targets ONLY visible elements.
+// @version      10.1.21
+// @description  Master Rating links to Wikipedia via DuckDuckGo "!ducky". Gear icon first. Hides default Jellyfin ratings but keeps Parental Rating. Fixes ID detection.
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.20 loading...');
+console.log('[Jellyfin Ratings] v10.1.21 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -509,30 +509,35 @@ function fetchRatings(container, tmdbId, type) {
     });
 }
 
-// === VISIBILITY TARGETING ENGINE ===
+// === GLOBAL ID SEARCH / VISIBLE INJECT ===
 
 function scan() {
     updateEndsAt();
 
-    // 1. Get current IMDB ID in DOM (just in case)
+    // 1. Get current IMDB ID in DOM (anywhere)
     const imdbLink = document.querySelector('a[href*="imdb.com/title/"]');
     if (imdbLink) {
         const m = imdbLink.href.match(/tt\d+/);
         if (m) currentImdbId = m[0];
     }
 
-    // 2. Identify the Active ID from the Browser URL (Source of Truth)
-    // Jellyfin URLs are usually like: /web/index.html#!/details?id=...&serverId=...
-    // Or /item?id=...
-    let activeId = null;
-    const urlParams = new URLSearchParams(window.location.hash.split('?')[1] || window.location.search);
-    if (urlParams.has('id')) {
-        // We have an ID from URL, but it's the Jellyfin internal ID, not TMDB.
-        // We still need to find the TMDB link in the DOM.
+    // 2. SEARCH GLOBAL DOCUMENT FOR TMDB ID (Crucial fix)
+    // We check ALL links, because Jellyfin might hide them in a footer or separate section
+    const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]');
+    let type = null, id = null;
+    
+    for (const a of tmdbLinks) {
+        const m = a.href.match(/\/(movie|tv)\/(\d+)/);
+        if (m) {
+            type = m[1] === 'tv' ? 'show' : 'movie';
+            id = m[2];
+            break; // Found one, assume it's the right one for the detail page
+        }
     }
 
-    // 3. Find the VISIBLE wrapper.
-    // Jellyfin keeps multiple .itemMiscInfo in DOM. Only one is visible.
+    if (!id) return; // No ID found on page
+
+    // 3. Find the VISIBLE wrapper to inject into.
     const allWrappers = document.querySelectorAll('.itemMiscInfo');
     let wrapper = null;
     for (const el of allWrappers) {
@@ -542,43 +547,28 @@ function scan() {
         }
     }
 
-    if (!wrapper) return; // No visible detail page found.
+    if (!wrapper) return; // No visible target
 
-    // 4. Find TMDB links specifically NEAR the visible wrapper
-    // We search up to the detail container, then down for links.
-    const detailContext = wrapper.closest('.detailRibbon') || wrapper.parentNode;
-    if (!detailContext) return;
-
-    const tmdbLink = detailContext.querySelector('a[href*="themoviedb.org/"]');
-    
-    if (tmdbLink) {
-        const m = tmdbLink.href.match(/\/(movie|tv)\/(\d+)/);
-        if (m) {
-            const type = m[1] === 'tv' ? 'show' : 'movie';
-            const id = m[2];
-            
-            // 5. Check if we already have ratings IN THIS VISIBLE WRAPPER
-            const existing = wrapper.querySelector('.mdblist-rating-container');
-                
-            if (!existing) {
-                const div = document.createElement('div');
-                div.className = 'mdblist-rating-container';
-                div.dataset.type = type;
-                div.dataset.tmdbId = id; 
-                wrapper.appendChild(div);
-                fetchRatings(div, id, type);
-            } 
-            else if (existing.dataset.tmdbId !== id) {
-                // If the container exists but has old data (Jellyfin reused the DOM element)
-                existing.remove();
-                const div = document.createElement('div');
-                div.className = 'mdblist-rating-container';
-                div.dataset.type = type;
-                div.dataset.tmdbId = id; 
-                wrapper.appendChild(div);
-                fetchRatings(div, id, type);
-            }
-        }
+    // 4. Check if we already have ratings IN THIS VISIBLE WRAPPER
+    const existing = wrapper.querySelector('.mdblist-rating-container');
+        
+    if (!existing) {
+        const div = document.createElement('div');
+        div.className = 'mdblist-rating-container';
+        div.dataset.type = type;
+        div.dataset.tmdbId = id; 
+        wrapper.appendChild(div);
+        fetchRatings(div, id, type);
+    } 
+    else if (existing.dataset.tmdbId !== id) {
+        // If the container exists but has old data
+        existing.remove();
+        const div = document.createElement('div');
+        div.className = 'mdblist-rating-container';
+        div.dataset.type = type;
+        div.dataset.tmdbId = id; 
+        wrapper.appendChild(div);
+        fetchRatings(div, id, type);
     }
 }
 
