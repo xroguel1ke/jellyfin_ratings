@@ -141,28 +141,26 @@ function updateGlobalStyles() {
             vertical-align: middle;
         }
         .mdbl-rating-item {
-            display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
+            display: inline-flex; align-items: center; margin: 0 6px;
             text-decoration: none;
-            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             cursor: pointer;
             color: inherit;
             position: relative;
             z-index: 10;
-            /* Force GPU & fix jitter */
-            transform: translate3d(0,0,0);
-            backface-visibility: hidden;
-            transform-origin: center center;
         }
-        /* Invisible stabilizer to expand hit area and prevent bouncing on hover */
-        .mdbl-rating-item::after {
-            content: '';
-            position: absolute;
-            top: -10px; bottom: -10px; left: -5px; right: -5px;
-            z-index: -1;
+        /* Wrapper for inner animation to prevent hover jitter */
+        .mdbl-inner {
+            display: flex; align-items: center; gap: 6px;
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transform-origin: center center;
+            will-change: transform;
+            backface-visibility: hidden;
         }
         .mdbl-rating-item:hover { 
-            transform: scale(1.15) rotate(2deg) translate3d(0,0,0); 
             z-index: 2147483647; 
+        }
+        .mdbl-rating-item:hover .mdbl-inner {
+            transform: scale(1.15) rotate(2deg);
         }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
@@ -172,7 +170,8 @@ function updateGlobalStyles() {
             padding: 4px 8px 4px 0; cursor: pointer !important; pointer-events: auto !important;
             order: -9999 !important; display: inline-flex;
         }
-        .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
+        .mdbl-settings-btn:hover { opacity: 1; }
+        .mdbl-settings-btn:hover .mdbl-inner { transform: scale(1.1); }
         .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
         
         .mdbl-status-text {
@@ -416,7 +415,7 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
     const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
+    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><div class="mdbl-inner"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></div></a>`;
 }
 
 function renderGearIcon(container, statusText = '') {
@@ -424,7 +423,7 @@ function renderGearIcon(container, statusText = '') {
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.title = 'Settings';
-        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>';
+        btn.innerHTML = '<div class="mdbl-inner"><svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg></div>';
         btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
         container.appendChild(btn);
     }
