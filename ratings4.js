@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.6 — Stable Hover Fix)
+// @name          Jellyfin Ratings (v10.2.5 — Fix Hover Bounce)
 // @namespace     https://mdblist.com
-// @version       10.2.6
-// @description   Uses native fetch (like other user script) to fix API errors. Enforces inline placement: Parental > EndsAt > Ratings. Fixes hover bouncing with hit-area overlay.
+// @version       10.2.5
+// @description   Uses native fetch (like other user script) to fix API errors. Enforces inline placement: Parental > EndsAt > Ratings. Fixes hover bouncing.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.6 loading...');
+console.log('[Jellyfin Ratings] v10.2.5 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -147,29 +147,18 @@ function updateGlobalStyles() {
             color: inherit;
             position: relative;
             z-index: 10;
-            /* FIX: Force GPU layer to prevent z-index repaint flicker */
-            transform: translateZ(0);
-            backface-visibility: hidden; 
         }
-        /* FIX: Stable Hit-Area Overlay. Prevents mouse-leave when inner element tilts. */
-        .mdbl-rating-item::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            z-index: 50;
-        }
-        
+        /* Wrapper for inner animation to prevent hover jitter */
         .mdbl-inner {
             display: flex; align-items: center; gap: 6px;
             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             transform-origin: center center;
             will-change: transform;
             backface-visibility: hidden;
-            pointer-events: none; /* Ignore mouse on the moving part, let the stable parent handle it */
+            pointer-events: none; /* FIX: Prevents bouncing by ignoring mouse on transformed child */
         }
-        
         .mdbl-rating-item:hover { 
-            z-index: 1000; /* Raised z-index but reasonable */
+            z-index: 2147483647; 
         }
         .mdbl-rating-item:hover .mdbl-inner {
             transform: scale(1.15) rotate(2deg);
