@@ -1,5 +1,6 @@
+
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.3.9 — Fix EndsAt)
+// @name          Jellyfin Ratings (v10.3.9 — Fix Trakt Links)
 // @namespace     https://mdblist.com
 // @version       10.3.9
 // @description   Displays ratings from multiple sources with a settings panel. Includes 3px spacing and vertical separator.
@@ -306,7 +307,12 @@ function generateLink(key, ids, apiLink, type, title) {
     switch(key) {
         case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
         case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        case 'trakt': return ids.trakt ? `https://trakt.tv/${safeType}s/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+        
+        case 'trakt': 
+             // FIX: Explicitly handle 'shows' vs 'movies' for Trakt URL
+             const traktType = (safeType === 'tv') ? 'shows' : 'movies';
+             return ids.trakt ? `https://trakt.tv/${traktType}/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
+
         case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
 
         case 'metacritic_critic':
