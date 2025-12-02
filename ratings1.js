@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.9 — Stability Fix)
+// @name          Jellyfin Ratings (v10.2.10 — Stability & Glow)
 // @namespace     https://mdblist.com
-// @version       10.2.9
-// @description   Fixes Bouncing after save. Larger Tooltips. Enforces Color Icons.
+// @version       10.2.10
+// @description   Fixes "After Save" Bouncing via Type-Safety. Boosts Color Icons visibility. Larger Tooltips.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.9 loading...');
+console.log('[Jellyfin Ratings] v10.2.10 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -90,16 +90,20 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        if (p.display && (isNaN(parseInt(p.display.posX)) || isNaN(parseInt(p.display.posY)))) {
-            p.display.posX = 0; p.display.posY = 0;
-        }
-        if (p.display.posX > 500) p.display.posX = 500;
-        if (p.display.posX < -700) p.display.posX = -700;
-        if (p.display.posY > 500) p.display.posY = 500;
-        if (p.display.posY < -500) p.display.posY = -500;
+        
+        // SAFETY: Ensure numbers are numbers to prevent string-based bounces
+        const safeInt = (val, def) => { const n = parseInt(val); return isNaN(n) ? def : n; };
+        
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
-            display: { ...DEFAULTS.display, ...p.display, colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } },
+            display: { 
+                ...DEFAULTS.display, 
+                ...p.display, 
+                posX: safeInt(p.display?.posX, 0),
+                posY: safeInt(p.display?.posY, 0),
+                colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, 
+                colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } 
+            },
             spacing: { ...DEFAULTS.spacing, ...p.spacing },
             priorities: { ...DEFAULTS.priorities, ...p.priorities }
         };
@@ -116,6 +120,10 @@ function saveConfig() {
 ========================================================================== */
 
 const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+// Clean up old styles if they exist to prevent duplicates
+const existingStyle = document.getElementById('mdbl-dynamic-styles');
+if (existingStyle) existingStyle.remove();
 
 const styleEl = document.createElement('style');
 styleEl.id = 'mdbl-dynamic-styles';
@@ -135,7 +143,6 @@ function updateGlobalStyles() {
             margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
-            /* FIX BOUNCING: Hardware-Beschleunigung für den Container */
             will-change: transform; 
             z-index: 2000; 
             position: relative; 
@@ -151,18 +158,21 @@ function updateGlobalStyles() {
             color: inherit;
             position: relative;
             z-index: 10;
+            /* Stabilize Layout */
+            transform-style: preserve-3d;
         }
 
-        /* FIX BOUNCING: Static Hit-Box Overlay */
+        /* FIX BOUNCING: Massive Static Hit-Box Overlay 
+           Covers a large area around the icon to catch fast mouse movements/rotations */
         .mdbl-rating-item::before {
             content: '';
             position: absolute;
-            top: -10px; bottom: -10px; left: -5px; right: -5px; 
+            top: -15px; bottom: -15px; left: -10px; right: -10px; 
             z-index: 50; 
             background: transparent;
         }
         
-        /* FIX BOUNCING: Inner elements ignore mouse */
+        /* FIX BOUNCING: Inner elements ignore mouse completely */
         .mdbl-inner {
             display: flex; align-items: center; gap: 6px;
             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -175,34 +185,35 @@ function updateGlobalStyles() {
         }
 
         .mdbl-rating-item:hover { 
-            z-index: 60; /* Higher than before overlay */
+            z-index: 60; 
         }
         
         .mdbl-rating-item:hover .mdbl-inner {
             transform: scale(1.15) rotate(2deg);
         }
+        
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
 
-        /* CUSTOM TOOLTIPS (Larger) */
+        /* CUSTOM TOOLTIPS (Larger & Smarter) */
         .mdbl-rating-item[data-title]:hover::after {
             content: attr(data-title);
             position: absolute;
-            bottom: 130%; 
+            bottom: 140%; /* Higher clearance */
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 15, 18, 0.98);
             border: 1px solid rgba(255,255,255,0.15);
             color: #eaeaea;
-            padding: 8px 12px; /* Größeres Padding */
+            padding: 8px 12px;
             border-radius: 8px;
-            font-size: 14px;   /* Größere Schrift */
+            font-size: 14px; /* Requested Increase */
             font-family: sans-serif;
             font-weight: 500;
             white-space: nowrap;
             z-index: 999999;
             pointer-events: none;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.6);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.75);
             backdrop-filter: blur(4px);
         }
         
@@ -270,9 +281,12 @@ function refreshDomElements() {
         const img = el.querySelector('img');
         const span = el.querySelector('span');
         
-        // FIX COLOR ICONS: !important added to force override
-        if (CFG.display.colorIcons) img.style.setProperty('filter', `drop-shadow(0 0 3px ${color})`, 'important');
-        else img.style.removeProperty('filter');
+        // FIX COLOR ICONS: More aggressive filter for visibility (5px glow)
+        if (CFG.display.colorIcons) {
+            img.style.setProperty('filter', `drop-shadow(0 0 5px ${color})`, 'important');
+        } else {
+            img.style.removeProperty('filter');
+        }
         
         if (CFG.display.colorNumbers) span.style.color = color;
         else span.style.color = '';
