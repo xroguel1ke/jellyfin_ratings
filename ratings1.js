@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.3.1 — No Z-Index Shift)
+// @name          Jellyfin Ratings (v10.3.2 — Padding Fix)
 // @namespace     https://mdblist.com
-// @version       10.3.1
-// @description   Removes Z-Index shift on hover to permanently fix bouncing. Cleaned features.
+// @version       10.3.2
+// @description   Padding-based stability to stop bouncing. Removed Color Icons/Sliders. Robust Menu Revert.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.3.1 loading...');
+console.log('[Jellyfin Ratings] v10.3.2 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -22,7 +22,8 @@ const DEFAULTS = {
     },
     display: {
         showPercentSymbol: false, 
-        colorNumbers: false, 
+        colorNumbers: false,
+        // Removed: colorIcons, posX, posY to ensure clean state
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true
@@ -94,6 +95,7 @@ function loadConfig() {
             display: { 
                 ...DEFAULTS.display, 
                 ...p.display, 
+                // Removed posX/posY loading to strictly use defaults/CSS
                 colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, 
                 colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } 
             },
@@ -126,7 +128,7 @@ function updateGlobalStyles() {
             justify-content: flex-start; 
             width: auto;
             margin-left: 12px; 
-            margin-top: ${CFG.spacing.ratingsTopGapPx}px;
+            margin-top: ${parseInt(CFG.spacing.ratingsTopGapPx) || 0}px;
             box-sizing: border-box;
             z-index: 2000; 
             position: relative; 
@@ -136,14 +138,15 @@ function updateGlobalStyles() {
             vertical-align: middle;
         }
         .mdbl-rating-item {
-            display: inline-flex; align-items: center; margin: 0 6px;
+            display: inline-flex; align-items: center; margin: 0 4px;
             text-decoration: none;
             cursor: pointer;
             color: inherit;
             position: relative;
             z-index: 10;
-            /* Stable transform origin */
-            transform-origin: center center;
+            /* PADDING FIX: Creates a safe zone around the icon so mouse doesn't leave during scale */
+            padding: 5px; 
+            border-radius: 4px;
         }
         
         /* Inner animation wrapper */
@@ -156,7 +159,11 @@ function updateGlobalStyles() {
             pointer-events: none; /* Mouse ignores moving part */
         }
 
-        /* REMOVED Z-INDEX SHIFT ON HOVER TO FIX BOUNCING */
+        .mdbl-rating-item:hover { 
+            /* No z-index shift to prevent layer repainting flicker */
+            background: rgba(255,255,255,0.05); /* Subtle highlight confirms hover state */
+        }
+        
         .mdbl-rating-item:hover .mdbl-inner {
             transform: scale(1.15) rotate(2deg);
         }
@@ -164,13 +171,13 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
 
-        /* CUSTOM TOOLTIPS */
+        /* CUSTOM TOOLTIPS (Larger & Smarter) */
         .mdbl-rating-item[data-title]:hover::after {
             content: attr(data-title);
             position: absolute;
-            bottom: 140%; 
+            bottom: 100%; 
             left: 50%;
-            transform: translateX(-50%);
+            transform: translateX(-50%) translateY(-5px);
             background: rgba(15, 15, 18, 0.98);
             border: 1px solid rgba(255,255,255,0.15);
             color: #eaeaea;
@@ -185,11 +192,11 @@ function updateGlobalStyles() {
             box-shadow: 0 4px 14px rgba(0,0,0,0.75);
             backdrop-filter: blur(4px);
         }
-        /* Shift tooltip left if near right edge */
+        
         .mdbl-rating-item:nth-last-child(-n+2)[data-title]:hover::after {
             left: auto;
-            right: -5px;
-            transform: none;
+            right: 0;
+            transform: translateY(-5px);
         }
         
         .mdbl-settings-btn {
@@ -251,7 +258,7 @@ function refreshDomElements() {
         const img = el.querySelector('img');
         const span = el.querySelector('span');
         
-        img.style.removeProperty('filter'); // Clean old filters
+        img.style.removeProperty('filter'); 
         
         if (CFG.display.colorNumbers) span.style.color = color;
         else span.style.color = '';
