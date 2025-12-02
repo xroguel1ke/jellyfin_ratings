@@ -1,13 +1,12 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.1.51 — Marker Strategy)
-// @namespace    https://mdblist.com
-// @version      10.1.51
-// @description  Master Rating links to Wikipedia. Gear icon first. Uses DOM element marking for reliable page transition detection (like reference script). Keeps all link fixes.
-// @match        *://*/*
-// @grant        GM_xmlhttpRequest
+// @name          Jellyfin Ratings (v10.2.4 — Native Fetch & Inline Fix)
+// @namespace     https://mdblist.com
+// @version       10.2.4
+// @description   Uses native fetch (like other user script) to fix API errors. Enforces inline placement: Parental > EndsAt > Ratings.
+// @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.1.51 loading...');
+console.log('[Jellyfin Ratings] v10.2.4 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -28,7 +27,7 @@ const DEFAULTS = {
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true
     },
-    spacing: { ratingsTopGapPx: 4 },
+    spacing: { ratingsTopGapPx: 0 },
     priorities: {
         master: -1, imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
         rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
@@ -114,15 +113,6 @@ function saveConfig() {
    2. UTILITIES & STYLES
 ========================================================================== */
 
-if (typeof GM_xmlhttpRequest === 'undefined') {
-    const PROXIES = ['https://api.allorigins.win/raw?url=', 'https://api.codetabs.com/v1/proxy?quest='];
-    window.GM_xmlhttpRequest = ({ method = 'GET', url, onload, onerror }) => {
-        const useProxy = !url.includes('mdblist.com') && !url.includes('graphql.anilist.co');
-        const finalUrl = useProxy ? PROXIES[Math.floor(Math.random() * PROXIES.length)] + encodeURIComponent(url) : url;
-        fetch(finalUrl).then(r => r.text().then(t => onload && onload({ status: r.status, responseText: t }))).catch(e => onerror && onerror(e));
-    };
-}
-
 const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 const styleEl = document.createElement('style');
@@ -135,24 +125,43 @@ function updateGlobalStyles() {
 
     let rules = `
         .mdblist-rating-container {
-            display: flex; flex-wrap: wrap; align-items: center;
-            justify-content: flex-end; 
-            width: 100%; margin-top: ${CFG.spacing.ratingsTopGapPx}px;
+            display: inline-flex; 
+            align-items: center;
+            justify-content: flex-start; 
+            width: auto;
+            margin-left: 12px; 
+            margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
-            z-index: 2147483647; position: relative; 
+            z-index: 2147483647; 
+            position: relative; 
             pointer-events: auto !important; 
             flex-shrink: 0;
             min-height: 24px;
+            vertical-align: middle;
         }
         .mdbl-rating-item {
-            display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
+            display: inline-flex; align-items: center; margin: 0 6px;
             text-decoration: none;
-            transition: transform 0.2s ease;
             cursor: pointer;
             color: inherit;
+            position: relative;
+            z-index: 10;
         }
-        .mdbl-rating-item:hover { transform: scale(1.15) rotate(2deg); z-index: 2147483647; }
+        /* Wrapper for inner animation to prevent hover jitter */
+        .mdbl-inner {
+            display: flex; align-items: center; gap: 6px;
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transform-origin: center center;
+            will-change: transform;
+            backface-visibility: hidden;
+        }
+        .mdbl-rating-item:hover { 
+            z-index: 2147483647; 
+        }
+        .mdbl-rating-item:hover .mdbl-inner {
+            transform: scale(1.15) rotate(2deg);
+        }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
         
@@ -161,7 +170,8 @@ function updateGlobalStyles() {
             padding: 4px 8px 4px 0; cursor: pointer !important; pointer-events: auto !important;
             order: -9999 !important; display: inline-flex;
         }
-        .mdbl-settings-btn:hover { opacity: 1; transform: scale(1.1); }
+        .mdbl-settings-btn:hover { opacity: 1; }
+        .mdbl-settings-btn:hover .mdbl-inner { transform: scale(1.1); }
         .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
         
         .mdbl-status-text {
@@ -170,10 +180,20 @@ function updateGlobalStyles() {
         }
 
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
-        #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; }
         
-        .mediaInfoOfficialRating { display: inline-flex !important; margin-right: 14px; }
-        .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
+        #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
+        
+        .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
+        
+        /* Force hiding of default ratings */
+        .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { 
+            display: none !important; 
+            opacity: 0 !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+        }
     `;
 
     Object.keys(CFG.priorities).forEach(key => {
@@ -264,6 +284,14 @@ function updateEndsAt() {
     for (const el of allWrappers) {
         if (el.offsetParent !== null) { primary = el; break; }
     }
+    
+    // Aggressive hiding of defaults
+    document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
+        el.style.display = 'none';
+        el.style.visibility = 'hidden';
+        el.style.width = '0px';
+    });
+
     if (!primary) return; 
 
     let minutes = 0;
@@ -280,6 +308,7 @@ function updateEndsAt() {
         }
     }
     
+    // Hide old native "Ends at" text
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -288,32 +317,48 @@ function updateEndsAt() {
             if (el.classList.contains('mediaInfoOfficialRating')) return;
             const t = (el.textContent || '').toLowerCase();
             if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
-                 if (minutes > 0) el.style.display = 'none';
-                 else el.style.display = ''; 
+                 el.style.display = 'none';
             }
         });
     }
-    document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
 
+    let span = document.getElementById('customEndsAt');
+    
+    // We want the order: [Official Rating] -> [Ends At] -> [MDB Ratings]
+    // 1. Find Official Rating
+    const officialRating = document.querySelector('.mediaInfoOfficialRating');
+    
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
-        let span = primary.querySelector('#customEndsAt');
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
-            const rc = primary.querySelector('.mdblist-rating-container');
-            if (rc && rc.nextSibling) primary.insertBefore(span, rc.nextSibling);
-            else primary.appendChild(span);
         }
         span.textContent = `Ends at ${timeStr}`;
-        span.style.display = ''; 
+        span.style.display = '';
+
+        // PLACEMENT LOGIC
+        if (officialRating && officialRating.parentNode) {
+            // Insert AFTER official rating
+            officialRating.insertAdjacentElement('afterend', span);
+        } else {
+             // Fallback
+             if(!primary.contains(span)) primary.appendChild(span);
+        }
     } else {
-        const span = primary.querySelector('#customEndsAt');
-        if(span) span.remove();
+        if(span) span.style.display = 'none';
+    }
+    
+    // If we have a ratings container, ensure it is AFTER customEndsAt
+    const rc = document.querySelector('.mdblist-rating-container');
+    if (rc && span && span.parentNode) {
+        span.insertAdjacentElement('afterend', rc);
+    } else if (rc && officialRating) {
+        officialRating.insertAdjacentElement('afterend', rc);
     }
 }
 
-// === LINK LOGIC (v10.1.50 Style) ===
+// === LINK LOGIC ===
 function generateLink(key, ids, apiLink, type, title) {
     const sLink = String(apiLink || '');
     const safeTitle = encodeURIComponent(title || '');
@@ -350,7 +395,6 @@ function generateLink(key, ids, apiLink, type, title) {
             return `https://myanimelist.net/anime.php?q=${safeTitle}`;
             
         case 'roger_ebert':
-             // Logic from v10.1.12 / 10.1.48
              if (sLink && sLink.length > 2 && sLink !== '#') {
                  if (sLink.startsWith('http')) return sLink;
                  let path = sLink.startsWith('/') ? sLink : `/${sLink}`;
@@ -371,7 +415,7 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
     const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></a>`;
+    return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><div class="mdbl-inner"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></div></a>`;
 }
 
 function renderGearIcon(container, statusText = '') {
@@ -379,7 +423,7 @@ function renderGearIcon(container, statusText = '') {
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.title = 'Settings';
-        btn.innerHTML = '<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>';
+        btn.innerHTML = '<div class="mdbl-inner"><svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg></div>';
         btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
         container.appendChild(btn);
     }
@@ -422,8 +466,8 @@ function renderRatings(container, data, pageImdbId, type) {
         tmdb: data.ids?.tmdb || data.id || data.tmdbid || data.tmdb_id, 
         trakt: data.ids?.trakt || data.traktid || data.trakt_id, 
         slug: data.ids?.slug || data.slug,
-        mal: data.ids?.mal,           
-        anilist: data.ids?.anilist    
+        mal: data.ids?.mal,            
+        anilist: data.ids?.anilist     
     };
     
     const add = (k, v, apiLink, c, tit, kind) => {
@@ -431,7 +475,6 @@ function renderRatings(container, data, pageImdbId, type) {
         html += createRatingHtml(k, v, safeLink, c, tit, kind);
     };
 
-    const fallbackSlug = localSlug(data.title || '');
     let masterSum = 0, masterCount = 0;
     const trackMaster = (val, scaleKey) => { if (val !== null && !isNaN(parseFloat(val))) { masterSum += parseFloat(val) * (SCALE[scaleKey] || 1); masterCount++; } };
 
@@ -492,30 +535,22 @@ function fetchRatings(container, id, type, apiMode) {
     container.dataset.fetching = 'true';
     updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
     
-    GM_xmlhttpRequest({
-        method: 'GET', url: apiUrl,
-        onload: r => {
+    // NATIVE FETCH (Reverted to this to fix 405 error)
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) throw new Error(String(response.status));
+            return response.json();
+        })
+        .then(d => {
             container.dataset.fetching = 'false';
-            if (r.status !== 200) { 
-                console.error('[MDBList] API Error:', r.status);
-                updateStatus(container, `API ${r.status}`, '#e53935');
-                return;
-            }
-            try {
-                const d = JSON.parse(r.responseText);
-                localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
-                renderRatings(container, d, currentImdbId, type);
-            } catch(e) { 
-                console.error('[MDBList] Parse Error', e); 
-                updateStatus(container, 'Parse Err', '#e53935');
-            }
-        },
-        onerror: e => { 
-            container.dataset.fetching = 'false'; 
-            console.error('[MDBList] Net Error', e); 
-            updateStatus(container, 'Net Err', '#e53935');
-        }
-    });
+            localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
+            renderRatings(container, d, currentImdbId, type);
+        })
+        .catch(e => {
+            container.dataset.fetching = 'false';
+            console.error('[MDBList] API Error:', e.message || e);
+            updateStatus(container, `API ${e.message || 'Err'}`, '#e53935');
+        });
 }
 
 function getJellyfinId() {
@@ -524,18 +559,14 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === SCANNER LOGIC (MARKER STRATEGY) ===
+// === SCANNER LOGIC ===
 function scan() {
     updateEndsAt();
-    
-    // Strategy: Find unprocessed TMDB/IMDb links in the DOM
-    // We use a data attribute to mark them so we don't re-process endlessly
-    // But if the link is destroyed/recreated (page nav), we catch it again.
     
     // 1. Look for TMDB links (Preferred)
     const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
     if (tmdbLinks.length > 0) {
-        const link = tmdbLinks[0]; // Take the first one
+        const link = tmdbLinks[0];
         link.dataset.mdblProcessed = "true";
         
         const m = link.href.match(/\/(movie|tv)\/(\d+)/);
@@ -543,7 +574,7 @@ function scan() {
             const type = m[1] === 'tv' ? 'show' : 'movie';
             const id = m[2];
             injectContainer(id, type, 'tmdb');
-            return; // Done for this cycle
+            return;
         }
     }
 
@@ -555,29 +586,58 @@ function scan() {
         
         const m = link.href.match(/tt\d+/);
         if (m) {
-            injectContainer(m[0], 'movie', 'imdb'); // Default to movie for imdb if unknown
+            injectContainer(m[0], 'movie', 'imdb');
             return;
         }
     }
 }
 
 function injectContainer(id, type, apiMode) {
-    // Find the right place to inject (First visible itemMiscInfo)
-    const allWrappers = document.querySelectorAll('.itemMiscInfo');
-    let wrapper = null;
-    for (const el of allWrappers) {
-        if (el.offsetParent !== null) { wrapper = el; break; }
-    }
-    if (!wrapper) return;
+    // 1. Find the official rating to locate the correct metadata ROW
+    let target = document.querySelector('.mediaInfoOfficialRating');
+    let parent = null;
 
-    // Clean up OLD container if it exists in this wrapper (from previous page)
-    const oldContainer = wrapper.querySelector('.mdblist-rating-container');
-    if (oldContainer) oldContainer.remove();
+    if (target && target.offsetParent !== null) {
+        // If we found the rating, use its PARENT as the container
+        parent = target.parentNode; 
+    } else {
+        // Fallback: search for itemMiscInfo
+         const allWrappers = document.querySelectorAll('.itemMiscInfo');
+         for (const el of allWrappers) {
+             if (el.offsetParent !== null) { 
+                 parent = el; 
+                 break; 
+             }
+         }
+    }
+
+    if (!parent) return;
+
+    // Check if we already have a container here
+    const existing = parent.querySelector('.mdblist-rating-container');
+    if (existing) {
+        if (existing.dataset.tmdbId === id) return;
+        
+        // PRIORITY FIX: If existing is TMDb and new is IMDb, ignore IMDb to prevent overwriting/flashing
+        if (existing.dataset.source === 'tmdb' && apiMode === 'imdb') return;
+        
+        existing.remove();
+    }
 
     const container = document.createElement('div');
     container.className = 'mdblist-rating-container';
-    container.dataset.tmdbId = id; // Mark with ID
-    wrapper.appendChild(container);
+    container.dataset.tmdbId = id; 
+    container.dataset.source = apiMode; 
+    
+    // We want to insert this AFTER customEndsAt if possible
+    const endsAt = document.getElementById('customEndsAt');
+    if (endsAt && endsAt.parentNode === parent) {
+        endsAt.insertAdjacentElement('afterend', container);
+    } else if (target && target.parentNode === parent) {
+        target.insertAdjacentElement('afterend', container);
+    } else {
+        parent.appendChild(container);
+    }
     
     renderGearIcon(container, 'Loading...');
     fetchRatings(container, id, type, apiMode);
@@ -586,7 +646,7 @@ function injectContainer(id, type, apiMode) {
 setInterval(scan, 500);
 
 /* ==========================================================================
-   4. SETTINGS MENU (INIT)
+   4. SETTINGS MENU
 ========================================================================== */
 function initMenu() {
     if(document.getElementById('mdbl-panel')) return;
