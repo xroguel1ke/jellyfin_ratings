@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.7 — Final Fix)
+// @name          Jellyfin Ratings (v10.2.8 — Hit-Area Fix)
 // @namespace     https://mdblist.com
-// @version       10.2.7
-// @description   Cleaned code. Fixes Menu Layout (removed stray BR tags). Fixes Hover Bouncing (Z-Index stability). Smart Tooltips.
+// @version       10.2.8
+// @description   Clean code. Fixes Menu. Fixes Bouncing via static ::before overlay. Smart Tooltips via ::after.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.7 loading...');
+console.log('[Jellyfin Ratings] v10.2.8 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -150,18 +150,32 @@ function updateGlobalStyles() {
             position: relative;
             z-index: 10;
         }
+
+        /* FIX BOUNCING: "Das Schutzschild" 
+           ::before legt sich als unsichtbare Fläche über das Icon.
+           Es bleibt stabil stehen, auch wenn sich das Icon darunter bewegt.
+           Die Maus interagiert nur mit diesem Schild -> kein Flackern.
+        */
+        .mdbl-rating-item::before {
+            content: '';
+            position: absolute;
+            top: -5px; bottom: -5px; left: -5px; right: -5px; /* Etwas größer als das Icon */
+            z-index: 50; /* Über dem Bild */
+            background: transparent;
+        }
         
-        /* FIX BOUNCING: Deaktiviert Maus-Events auf dem animierten Inhalt */
+        /* Deaktiviert Maus-Events auf dem animierten Inhalt, damit ::before übernimmt */
         .mdbl-inner {
             display: flex; align-items: center; gap: 6px;
             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             transform-origin: center center;
             will-change: transform;
             backface-visibility: hidden;
-            pointer-events: none; /* WICHTIG: Maus ignoriert die Bewegung */
+            pointer-events: none; 
+            position: relative;
+            z-index: 10;
         }
 
-        /* FIX BOUNCING: Kein extremer Z-Index Sprung mehr */
         .mdbl-rating-item:hover { 
             z-index: 20; 
         }
@@ -172,11 +186,11 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
 
-        /* CUSTOM TOOLTIPS (Ersetzt native Browser Tooltips um Abschneiden zu verhindern) */
+        /* CUSTOM TOOLTIPS (Nutzt ::after, daher brauchten wir ::before für den Fix oben) */
         .mdbl-rating-item[data-title]:hover::after {
             content: attr(data-title);
             position: absolute;
-            bottom: 125%; /* Etwas höher als das Icon */
+            bottom: 125%; 
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 15, 18, 0.98);
@@ -451,7 +465,6 @@ function createRatingHtml(key, val, link, count, title, kind) {
     const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${kind||'Votes'}` : title;
     
     const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-    // Removed native title attribute to prevent double tooltips, using data-title only
     return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" data-title="${tooltip}"><div class="mdbl-inner"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></div></a>`;
 }
 
