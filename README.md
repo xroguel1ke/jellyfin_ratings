@@ -20,7 +20,7 @@
     * **Smart Wiki Link:** Clicking the Master Rating star performs an "I'm Feeling Lucky" search to take you directly to the English **Wikipedia** article for the title.
 * **🎨 Highly Customizable:**
     * **Toggle & Reorder:** Enable only the sources you trust and drag-and-drop them in the settings menu to change their order.
-    * **Visual Styles:** Choose between raw numbers or percentages, color-coded scores (Red/Orange/Green), and colored icons.
+    * **Visual Styles:** Choose between raw numbers or percentages, color-coded scores (Red/Orange/Green).
 * **🛡️ Robust Loading:** Uses a resilient injection method that handles network timeouts and caching issues effectively.
 * **⚡ Lightweight:** Runs entirely client-side within the browser; no heavy server-side processes required.
 
@@ -160,8 +160,6 @@ Settings Options
 
         Color numbers: Colors the text based on the score.
 
-        Color icons: Adds a colored glow/shadow to the icons.
-
         Show %: Toggles the percentage symbol.
 
     Colors: Customize the thresholds for Red, Orange, and Green ratings.
@@ -172,21 +170,6 @@ Usage
 
     Wikipedia Link: Click on the Master Rating (⭐ icon) to open a new tab searching for the movie/show on Wikipedia (English). It uses a smart redirect to find the correct article automatically.
 
-🛠️ Development
-
-If you want to fork or contribute to this script:
-
-    Development Mode: In the injector code, set isDevelopment: true.
-
-        This forces the script to load from raw.githubusercontent.com with a timestamp cache-buster.
-
-        Benefit: You see your commits immediately after pushing.
-
-    Production Mode: Set isDevelopment: false.
-
-        This uses jsDelivr for content delivery.
-
-        Benefit: Faster loading times, correct MIME types, and caching for end-users.
 
 🤝 Acknowledgments
 
