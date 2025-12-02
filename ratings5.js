@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.2.5 — Hover Fix)
+// @name         Jellyfin Ratings (v10.2.6 — SPA & Hover Fix)
 // @namespace    https://mdblist.com
-// @version      10.2.5
-// @description  Fixes "bouncing" hover animation, uses native fetch, and enforces inline placement.
+// @version      10.2.6
+// @description  Fixes "not loading" on navigation (SPA), stabilizes hover animation, and uses native fetch.
 // @match        *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.5 loading...');
+console.log('[Jellyfin Ratings] v10.2.6 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -133,7 +133,7 @@ function updateGlobalStyles() {
             margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
-            z-index: 2147483647; 
+            z-index: 100; /* Ensured visibility */
             position: relative; 
             pointer-events: auto !important; 
             flex-shrink: 0;
@@ -141,7 +141,7 @@ function updateGlobalStyles() {
             vertical-align: middle;
         }
         
-        /* HOVER FIX: Smoother transition, no z-index switching */
+        /* HOVER FIX: Smoother transition, removed z-index flip */
         .mdbl-rating-item {
             display: inline-flex; 
             align-items: center; 
@@ -160,7 +160,6 @@ function updateGlobalStyles() {
         
         .mdbl-rating-item:hover { 
             transform: scale(1.15) rotate(2deg); 
-            /* REMOVED: z-index change here to prevent flickering */
         }
         
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
@@ -185,6 +184,7 @@ function updateGlobalStyles() {
         
         .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
         
+        /* Force hiding of default ratings */
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { 
             display: none !important; 
             opacity: 0 !important;
@@ -342,6 +342,7 @@ function updateEndsAt() {
         if(span) span.style.display = 'none';
     }
     
+    // Ensure order is correct every cycle
     const rc = document.querySelector('.mdblist-rating-container');
     if (rc && span && span.parentNode) {
         span.insertAdjacentElement('afterend', rc);
@@ -551,35 +552,41 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === SCANNER LOGIC ===
+// === SCANNER LOGIC (SPA FIX) ===
 function scan() {
     updateEndsAt();
     
-    // 1. Look for TMDB links (Preferred)
-    const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
-    if (tmdbLinks.length > 0) {
-        const link = tmdbLinks[0];
-        link.dataset.mdblProcessed = "true";
-        
-        const m = link.href.match(/\/(movie|tv)\/(\d+)/);
-        if (m) {
-            const type = m[1] === 'tv' ? 'show' : 'movie';
-            const id = m[2];
-            injectContainer(id, type, 'tmdb');
-            return;
+    // Check if the rating container is missing from the view (SPA Navigation handling)
+    const officialRating = document.querySelector('.mediaInfoOfficialRating');
+    const existingContainer = document.querySelector('.mdblist-rating-container');
+    
+    if (officialRating && !existingContainer) {
+        // If we see metadata but no ratings, we need to scan
+        // 1. Look for TMDB links (Preferred)
+        const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]');
+        if (tmdbLinks.length > 0) {
+            const m = tmdbLinks[0].href.match(/\/(movie|tv)\/(\d+)/);
+            if (m) {
+                injectContainer(m[2], m[1] === 'tv' ? 'show' : 'movie', 'tmdb');
+                return;
+            }
         }
-    }
-
-    // 2. Look for IMDb links (Fallback)
-    const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
-    if (imdbLinks.length > 0) {
-        const link = imdbLinks[0];
-        link.dataset.mdblProcessed = "true";
-        
-        const m = link.href.match(/tt\d+/);
-        if (m) {
-            injectContainer(m[0], 'movie', 'imdb');
-            return;
+        // 2. Look for IMDb links (Fallback)
+        const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]');
+        if (imdbLinks.length > 0) {
+            const m = imdbLinks[0].href.match(/tt\d+/);
+            if (m) {
+                injectContainer(m[0], 'movie', 'imdb');
+                return;
+            }
+        }
+    } else if (!officialRating && !existingContainer) {
+        // Sometimes "Official Rating" element is missing on certain items, try to find itemMiscInfo
+        // and inject based on found links anyway
+        const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]');
+        if (tmdbLinks.length > 0) {
+             const m = tmdbLinks[0].href.match(/\/(movie|tv)\/(\d+)/);
+             if(m) injectContainer(m[2], m[1] === 'tv' ? 'show' : 'movie', 'tmdb');
         }
     }
 }
@@ -609,10 +616,7 @@ function injectContainer(id, type, apiMode) {
     const existing = parent.querySelector('.mdblist-rating-container');
     if (existing) {
         if (existing.dataset.tmdbId === id) return;
-        
-        // PRIORITY FIX: If existing is TMDb and new is IMDb, ignore IMDb to prevent overwriting/flashing
         if (existing.dataset.source === 'tmdb' && apiMode === 'imdb') return;
-        
         existing.remove();
     }
 
@@ -621,7 +625,7 @@ function injectContainer(id, type, apiMode) {
     container.dataset.tmdbId = id; 
     container.dataset.source = apiMode; 
     
-    // We want to insert this AFTER customEndsAt if possible
+    // Insert Logic: Order is Official > EndsAt > Ratings
     const endsAt = document.getElementById('customEndsAt');
     if (endsAt && endsAt.parentNode === parent) {
         endsAt.insertAdjacentElement('afterend', container);
@@ -720,144 +724,6 @@ function initMenu() {
             panel.style.display = 'none';
         }
     });
-}
-
-function renderMenuContent(panel) {
-    const row = (label, input) => `<div class="mdbl-row"><span>${label}</span>${input}</div>`;
-    const sliderRow = (label, idRange, idNum, min, max, val) => `
-    <div class="mdbl-slider-row">
-        <span>${label}</span>
-        <div class="slider-wrapper">
-            <input type="range" id="${idRange}" min="${min}" max="${max}" value="${val}">
-            <input type="number" id="${idNum}" value="${val}" class="mdbl-pos-input">
-        </div>
-    </div>`;
-    
-    let html = `
-    <header><h3>Settings</h3><button id="mdbl-close">✕</button></header>
-    <div class="mdbl-section" id="mdbl-sec-keys">
-       ${(!INJ_KEYS.MDBLIST && !JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${(JSON.parse(localStorage.getItem('mdbl_keys')||'{}').MDBLIST)||''}"></div>` : ''}
-    </div>
-    <div class="mdbl-section"><div class="mdbl-subtle">Sources (drag to reorder)</div><div id="mdbl-sources"></div><hr></div>
-    <div class="mdbl-section" id="mdbl-sec-display">
-        <div class="mdbl-subtle">Display</div>
-        ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
-        ${row('Color icons', `<input type="checkbox" id="d_cicon" ${CFG.display.colorIcons?'checked':''}>`)}
-        ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
-        ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
-        ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -700, 500, CFG.display.posX)}
-        ${sliderRow('Position Y (px)', 'd_y_rng', 'd_y_num', -500, 500, CFG.display.posY)}
-        <hr>
-        <div class="mdbl-subtle">Color bands &amp; palette</div>
-        <div class="mdbl-grid">
-            ${createColorBandRow('th_red', 'Rating', CFG.display.colorBands.redMax, 'red')}
-            ${createColorBandRow('th_orange', 'Rating', CFG.display.colorBands.orangeMax, 'orange')}
-            ${createColorBandRow('th_yg', 'Rating', CFG.display.colorBands.ygMax, 'yg')}
-            <div class="grid-row">
-                <label id="label_top_tier">Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)</label>
-                <div class="grid-right">
-                    <span class="sw" id="sw_mg" style="background:${SWATCHES.mg[CFG.display.colorChoice.mg]}"></span>
-                    <select id="col_mg" class="mdbl-select">${PALETTE_NAMES.mg.map((n,i)=>`<option value="${i}" ${CFG.display.colorChoice.mg===i?'selected':''}>${n}</option>`).join('')}</select>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="mdbl-actions" style="padding-bottom:16px">
-      <button id="mdbl-btn-reset">Reset</button>
-      <button id="mdbl-btn-save" class="primary">Save & Apply</button>
-    </div>`;
-    
-    panel.innerHTML = html;
-    
-    const sList = panel.querySelector('#mdbl-sources');
-    Object.keys(CFG.priorities).sort((a,b) => CFG.priorities[a]-CFG.priorities[b]).forEach(k => {
-         if (!CFG.sources.hasOwnProperty(k)) return;
-         const div = document.createElement('div');
-         div.className = 'mdbl-source mdbl-src-row';
-         div.draggable = true;
-         div.dataset.key = k;
-         div.innerHTML = `
-            <div class="mdbl-src-left">
-                <span class="mdbl-drag-handle">⋮⋮</span>
-                <img src="${LOGO[k]||''}" style="height:16px">
-                <span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span>
-            </div>
-            <input type="checkbox" class="src-check" ${CFG.sources[k]?'checked':''}>
-         `;
-         sList.appendChild(div);
-    });
-
-    panel.querySelector('#mdbl-close').onclick = () => panel.style.display = 'none';
-    
-    const updateLiveAll = () => {
-        CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
-        CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
-        CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
-        CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; 
-        CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
-        CFG.display.colorBands.orangeMax = parseInt(panel.querySelector('#th_orange').value)||69;
-        CFG.display.colorBands.ygMax = parseInt(panel.querySelector('#th_yg').value)||79;
-        ['red','orange','yg','mg'].forEach(k => CFG.display.colorChoice[k] = parseInt(panel.querySelector(`#col_${k}`).value)||0);
-        panel.querySelector('#label_top_tier').textContent = `Top tier (≥ ${CFG.display.colorBands.ygMax+1}%)`;
-        ['red','orange','yg','mg'].forEach(k => panel.querySelector(`#sw_${k}`).style.background = SWATCHES[k][CFG.display.colorChoice[k]]);
-        refreshDomElements();
-    };
-    panel.querySelectorAll('input, select').forEach(el => {
-        if(el.type === 'range' || el.type === 'text' || el.type === 'number') el.addEventListener('input', updateLiveAll);
-        else el.addEventListener('change', updateLiveAll);
-    });
-
-    const updatePos = (axis, val) => {
-        CFG.display[axis] = parseInt(val);
-        panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_rng`).value = val;
-        panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_num`).value = val;
-        updateGlobalStyles();
-    };
-    const bindPos = (id, fn) => panel.querySelector(id).addEventListener('input', fn);
-    bindPos('#d_x_rng', (e) => updatePos('posX', e.target.value));
-    bindPos('#d_x_num', (e) => updatePos('posX', e.target.value));
-    bindPos('#d_y_rng', (e) => updatePos('posY', e.target.value));
-    bindPos('#d_y_num', (e) => updatePos('posY', e.target.value));
-    
-    panel.querySelectorAll('.src-check').forEach(cb => {
-        cb.addEventListener('change', (e) => {
-            CFG.sources[e.target.closest('.mdbl-source').dataset.key] = e.target.checked;
-            updateGlobalStyles();
-        });
-    });
-
-    let dragSrc = null;
-    panel.querySelectorAll('.mdbl-src-row').forEach(row => {
-        row.addEventListener('dragstart', e => { dragSrc = row; e.dataTransfer.effectAllowed = 'move'; });
-        row.addEventListener('dragover', e => { 
-            e.preventDefault(); 
-            if (dragSrc && dragSrc !== row) {
-                const list = row.parentNode;
-                const all = [...list.children];
-                const srcI = all.indexOf(dragSrc);
-                const tgtI = all.indexOf(row);
-                if (srcI < tgtI) list.insertBefore(dragSrc, row.nextSibling);
-                else list.insertBefore(dragSrc, row);
-                [...list.querySelectorAll('.mdbl-src-row')].forEach((r, i) => CFG.priorities[r.dataset.key] = i+1);
-                updateGlobalStyles();
-            }
-        });
-    });
-
-    panel.querySelector('#mdbl-btn-save').onclick = () => {
-        saveConfig();
-        const ki = panel.querySelector('#mdbl-key-mdb');
-        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
-        location.reload();
-    };
-    panel.querySelector('#mdbl-btn-reset').onclick = () => {
-        if(confirm('Reset all settings?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }
-    };
-    const getInjectorKey = () => { try { return (window.MDBL_KEYS && window.MDBL_KEYS.MDBLIST) ? String(window.MDBL_KEYS.MDBLIST) : ''; } catch { return ''; } };
-    if (getInjectorKey()) {
-       const kw = panel.querySelector('#mdbl-sec-keys');
-       if(kw) { kw.innerHTML = ''; kw.style.display = 'none'; }
-    }
 }
 
 function createColorBandRow(id, lbl, val, key) {
