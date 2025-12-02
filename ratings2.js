@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.10 — Stability & Glow)
+// @name          Jellyfin Ratings (v10.3.0 — Stable & Clean)
 // @namespace     https://mdblist.com
-// @version       10.2.10
-// @description   Fixes "After Save" Bouncing via Type-Safety. Boosts Color Icons visibility. Larger Tooltips.
+// @version       10.3.0
+// @description   Removed Color Icons & Sliders. Fixes Bouncing by removing transforms. Fixes Menu Cancel/Revert logic.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.10 loading...');
+console.log('[Jellyfin Ratings] v10.3.0 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -23,8 +23,7 @@ const DEFAULTS = {
     display: {
         showPercentSymbol: false, 
         colorNumbers: false, 
-        colorIcons: false,
-        posX: 0, posY: 0,
+        // REMOVED: colorIcons, posX, posY
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true
@@ -78,6 +77,8 @@ const LABEL = {
 };
 
 let CFG = loadConfig();
+// Backup for menu cancel
+let CFG_BACKUP = null; 
 let currentImdbId = null;
 
 // GET KEY SAFELY
@@ -90,17 +91,12 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        
-        // SAFETY: Ensure numbers are numbers to prevent string-based bounces
-        const safeInt = (val, def) => { const n = parseInt(val); return isNaN(n) ? def : n; };
-        
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: { 
                 ...DEFAULTS.display, 
                 ...p.display, 
-                posX: safeInt(p.display?.posX, 0),
-                posY: safeInt(p.display?.posY, 0),
+                // Ensure colorBands/Choice structure exists
                 colorBands: { ...DEFAULTS.display.colorBands, ...p.display?.colorBands }, 
                 colorChoice: { ...DEFAULTS.display.colorChoice, ...p.display?.colorChoice } 
             },
@@ -121,18 +117,11 @@ function saveConfig() {
 
 const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
-// Clean up old styles if they exist to prevent duplicates
-const existingStyle = document.getElementById('mdbl-dynamic-styles');
-if (existingStyle) existingStyle.remove();
-
 const styleEl = document.createElement('style');
 styleEl.id = 'mdbl-dynamic-styles';
 document.head.appendChild(styleEl);
 
 function updateGlobalStyles() {
-    document.documentElement.style.setProperty('--mdbl-x', `${CFG.display.posX}px`);
-    document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
-
     let rules = `
         .mdblist-rating-container {
             display: inline-flex; 
@@ -142,8 +131,7 @@ function updateGlobalStyles() {
             margin-left: 12px; 
             margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
-            transform: translate(var(--mdbl-x), var(--mdbl-y));
-            will-change: transform; 
+            /* REMOVED TRANSFORM TRANSLATE TO FIX BOUNCING */
             z-index: 2000; 
             position: relative; 
             pointer-events: auto !important; 
@@ -158,48 +146,32 @@ function updateGlobalStyles() {
             color: inherit;
             position: relative;
             z-index: 10;
-            /* Stabilize Layout */
-            transform-style: preserve-3d;
-        }
-
-        /* FIX BOUNCING: Massive Static Hit-Box Overlay 
-           Covers a large area around the icon to catch fast mouse movements/rotations */
-        .mdbl-rating-item::before {
-            content: '';
-            position: absolute;
-            top: -15px; bottom: -15px; left: -10px; right: -10px; 
-            z-index: 50; 
-            background: transparent;
         }
         
-        /* FIX BOUNCING: Inner elements ignore mouse completely */
+        /* Inner animation wrapper */
         .mdbl-inner {
             display: flex; align-items: center; gap: 6px;
             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             transform-origin: center center;
             will-change: transform;
             backface-visibility: hidden;
-            pointer-events: none !important; 
-            position: relative;
-            z-index: 10;
+            pointer-events: none; /* Mouse ignores moving part */
         }
 
         .mdbl-rating-item:hover { 
             z-index: 60; 
         }
-        
         .mdbl-rating-item:hover .mdbl-inner {
             transform: scale(1.15) rotate(2deg);
         }
-        
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
 
-        /* CUSTOM TOOLTIPS (Larger & Smarter) */
+        /* CUSTOM TOOLTIPS */
         .mdbl-rating-item[data-title]:hover::after {
             content: attr(data-title);
             position: absolute;
-            bottom: 140%; /* Higher clearance */
+            bottom: 140%; 
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 15, 18, 0.98);
@@ -207,7 +179,7 @@ function updateGlobalStyles() {
             color: #eaeaea;
             padding: 8px 12px;
             border-radius: 8px;
-            font-size: 14px; /* Requested Increase */
+            font-size: 14px;
             font-family: sans-serif;
             font-weight: 500;
             white-space: nowrap;
@@ -216,7 +188,7 @@ function updateGlobalStyles() {
             box-shadow: 0 4px 14px rgba(0,0,0,0.75);
             backdrop-filter: blur(4px);
         }
-        
+        /* Shift tooltip left if near right edge */
         .mdbl-rating-item:nth-last-child(-n+2)[data-title]:hover::after {
             left: auto;
             right: -5px;
@@ -243,6 +215,7 @@ function updateGlobalStyles() {
         
         .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
         
+        /* Force hiding of default ratings */
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { 
             display: none !important; 
             opacity: 0 !important;
@@ -281,12 +254,8 @@ function refreshDomElements() {
         const img = el.querySelector('img');
         const span = el.querySelector('span');
         
-        // FIX COLOR ICONS: More aggressive filter for visibility (5px glow)
-        if (CFG.display.colorIcons) {
-            img.style.setProperty('filter', `drop-shadow(0 0 5px ${color})`, 'important');
-        } else {
-            img.style.removeProperty('filter');
-        }
+        // NO COLOR ICONS LOGIC ANYMORE
+        img.style.removeProperty('filter');
         
         if (CFG.display.colorNumbers) span.style.color = color;
         else span.style.color = '';
@@ -311,12 +280,33 @@ function fixUrl(url, domain) {
 
 function openSettingsMenu() {
     initMenu();
+    // CREATE BACKUP
+    CFG_BACKUP = JSON.parse(JSON.stringify(CFG));
+    
     const p = document.getElementById('mdbl-panel');
     if(p) {
         const col = getComputedStyle(document.documentElement).getPropertyValue('--theme-primary-color').trim() || '#2a6df4';
         p.style.setProperty('--mdbl-theme', col);
         renderMenuContent(p);
         p.style.display = 'block';
+    }
+}
+
+function closeSettingsMenu(save) {
+    const p = document.getElementById('mdbl-panel');
+    if (p) p.style.display = 'none';
+    
+    if (save) {
+        saveConfig();
+        const ki = p.querySelector('#mdbl-key-mdb');
+        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
+        location.reload();
+    } else {
+        // REVERT
+        if (CFG_BACKUP) {
+            CFG = JSON.parse(JSON.stringify(CFG_BACKUP));
+            refreshDomElements();
+        }
     }
 }
 
@@ -719,15 +709,10 @@ function initMenu() {
     #mdbl-panel .mdbl-subtle { color:#9aa0a6; font-size:12px; }
     #mdbl-panel .mdbl-row, #mdbl-panel .mdbl-source { display:grid; grid-template-columns:1fr var(--mdbl-right-col); align-items:center; gap:5px; padding:2px 6px; border-radius:6px; min-height: 32px; }
     #mdbl-panel .mdbl-row { background:transparent; border:1px solid rgba(255,255,255,0.06); box-sizing:border-box; }
-    .mdbl-slider-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 4px 6px; border-radius: 6px; background: transparent; border: 1px solid rgba(255,255,255,0.06); min-height: 32px; }
-    .mdbl-slider-row > span { white-space: nowrap; width: 110px; flex-shrink: 0; }
-    .mdbl-slider-row .slider-wrapper { flex-grow: 1; display: flex; align-items: center; gap: 10px; justify-content: flex-end; width: 100%; }
     #mdbl-panel input[type="checkbox"] { transform: scale(1.2); cursor: pointer; accent-color: var(--mdbl-theme); }
-    #mdbl-panel input[type="range"] { flex-grow: 1; width: 100%; margin: 0; cursor: pointer; accent-color: var(--mdbl-theme); }
     #mdbl-panel input[type="text"] { width:100%; padding:10px 0; border:0; background:transparent; color:#eaeaea; font-size:14px; outline:none; }
-    #mdbl-panel select, #mdbl-panel input.mdbl-pos-input, #mdbl-panel input.mdbl-num-input { padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea; height:28px; line-height: 28px; font-size: 12px; box-sizing:border-box; display:inline-block; color-scheme: dark; }
+    #mdbl-panel select, #mdbl-panel input.mdbl-num-input { padding:0 10px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#121317; color:#eaeaea; height:28px; line-height: 28px; font-size: 12px; box-sizing:border-box; display:inline-block; color-scheme: dark; }
     #mdbl-panel .mdbl-select { width:140px; justify-self:end; }
-    #mdbl-panel input.mdbl-pos-input { width: 75px; text-align: center; font-size: 14px; }
     #mdbl-panel input.mdbl-num-input { width: 60px; text-align: center; }
     #mdbl-panel .mdbl-actions { position:sticky; bottom:0; background:rgba(22,22,26,0.96); display:flex; gap:10px; padding:6px 10px; border-top:1px solid rgba(255,255,255,0.08); }
     #mdbl-panel button { padding:9px 12px; border-radius:10px; border:1px solid rgba(255,255,255,0.15); background:#1b1c20; color:#eaeaea; cursor:pointer; }
@@ -780,21 +765,13 @@ function initMenu() {
     
     document.addEventListener('mousedown', (e) => {
         if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('.mdbl-settings-btn')) {
-            panel.style.display = 'none';
+            closeSettingsMenu(false); // Revert changes
         }
     });
 }
 
 function renderMenuContent(panel) {
     const row = (label, input) => `<div class="mdbl-row"><span>${label}</span>${input}</div>`;
-    const sliderRow = (label, idRange, idNum, min, max, val) => `
-    <div class="mdbl-slider-row">
-        <span>${label}</span>
-        <div class="slider-wrapper">
-            <input type="range" id="${idRange}" min="${min}" max="${max}" value="${val}">
-            <input type="number" id="${idNum}" value="${val}" class="mdbl-pos-input">
-        </div>
-    </div>`;
     
     let html = `
     <header><h3>Settings</h3><button id="mdbl-close">✕</button></header>
@@ -805,11 +782,8 @@ function renderMenuContent(panel) {
     <div class="mdbl-section" id="mdbl-sec-display">
         <div class="mdbl-subtle">Display</div>
         ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
-        ${row('Color icons', `<input type="checkbox" id="d_cicon" ${CFG.display.colorIcons?'checked':''}>`)}
         ${row('Show %', `<input type="checkbox" id="d_pct" ${CFG.display.showPercentSymbol?'checked':''}>`)}
         ${row('Enable 24h format', `<input type="checkbox" id="d_24h" ${CFG.display.endsAt24h?'checked':''}>`)}
-        ${sliderRow('Position X (px)', 'd_x_rng', 'd_x_num', -700, 500, CFG.display.posX)}
-        ${sliderRow('Position Y (px)', 'd_y_rng', 'd_y_num', -500, 500, CFG.display.posY)}
         <hr>
         <div class="mdbl-subtle">Color bands &amp; palette</div>
         <div class="mdbl-grid">
@@ -850,11 +824,10 @@ function renderMenuContent(panel) {
          sList.appendChild(div);
     });
 
-    panel.querySelector('#mdbl-close').onclick = () => panel.style.display = 'none';
+    panel.querySelector('#mdbl-close').onclick = () => closeSettingsMenu(false); // Cancel
     
     const updateLiveAll = () => {
         CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
-        CFG.display.colorIcons = panel.querySelector('#d_cicon').checked;
         CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
         CFG.display.endsAt24h = panel.querySelector('#d_24h').checked; 
         CFG.display.colorBands.redMax = parseInt(panel.querySelector('#th_red').value)||50;
@@ -869,18 +842,6 @@ function renderMenuContent(panel) {
         if(el.type === 'range' || el.type === 'text' || el.type === 'number') el.addEventListener('input', updateLiveAll);
         else el.addEventListener('change', updateLiveAll);
     });
-
-    const updatePos = (axis, val) => {
-        CFG.display[axis] = parseInt(val);
-        panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_rng`).value = val;
-        panel.querySelector(`#d_${axis === 'posX' ? 'x' : 'y'}_num`).value = val;
-        updateGlobalStyles();
-    };
-    const bindPos = (id, fn) => panel.querySelector(id).addEventListener('input', fn);
-    bindPos('#d_x_rng', (e) => updatePos('posX', e.target.value));
-    bindPos('#d_x_num', (e) => updatePos('posX', e.target.value));
-    bindPos('#d_y_rng', (e) => updatePos('posY', e.target.value));
-    bindPos('#d_y_num', (e) => updatePos('posY', e.target.value));
     
     panel.querySelectorAll('.src-check').forEach(cb => {
         cb.addEventListener('change', (e) => {
@@ -907,12 +868,7 @@ function renderMenuContent(panel) {
         });
     });
 
-    panel.querySelector('#mdbl-btn-save').onclick = () => {
-        saveConfig();
-        const ki = panel.querySelector('#mdbl-key-mdb');
-        if(ki && ki.value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: ki.value.trim()}));
-        location.reload();
-    };
+    panel.querySelector('#mdbl-btn-save').onclick = () => closeSettingsMenu(true); // Save
     panel.querySelector('#mdbl-btn-reset').onclick = () => {
         if(confirm('Reset all settings?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }
     };
