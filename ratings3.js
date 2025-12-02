@@ -143,14 +143,27 @@ function updateGlobalStyles() {
         .mdbl-rating-item {
             display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
             text-decoration: none;
-            transition: transform 0.2s ease;
+            transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             cursor: pointer;
             color: inherit;
-            position: relative; /* Fixed: Prevents jitter on hover */
-            will-change: transform; /* Fixed: Smoother animation */
-            backface-visibility: hidden; /* Fixed: Prevents bouncing */
+            position: relative;
+            z-index: 10;
+            /* Force GPU & fix jitter */
+            transform: translate3d(0,0,0);
+            backface-visibility: hidden;
+            transform-origin: center center;
         }
-        .mdbl-rating-item:hover { transform: scale(1.15) rotate(2deg); z-index: 2147483647; }
+        /* Invisible stabilizer to expand hit area and prevent bouncing on hover */
+        .mdbl-rating-item::after {
+            content: '';
+            position: absolute;
+            top: -10px; bottom: -10px; left: -5px; right: -5px;
+            z-index: -1;
+        }
+        .mdbl-rating-item:hover { 
+            transform: scale(1.15) rotate(2deg) translate3d(0,0,0); 
+            z-index: 2147483647; 
+        }
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
         
