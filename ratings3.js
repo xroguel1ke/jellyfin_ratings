@@ -1,13 +1,13 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.2.0 — Inline Parental Strategy)
+// @name         Jellyfin Ratings (v10.2.1 — Inline Fix)
 // @namespace    https://mdblist.com
-// @version      10.2.0
-// @description  Places ratings next to parental rating (like other user script) but keeps sliders/settings.
+// @version      10.2.1
+// @description  Places ratings truly inline with metadata (Year > Runtime > Parental > EndsAt > Ratings).
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.0 loading...');
+console.log('[Jellyfin Ratings] v10.2.1 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -28,7 +28,7 @@ const DEFAULTS = {
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true
     },
-    spacing: { ratingsTopGapPx: 0 }, // Changed default to 0 for inline look
+    spacing: { ratingsTopGapPx: 0 },
     priorities: {
         master: -1, imdb: 1, tmdb: 2, trakt: 3, letterboxd: 4,
         rotten_tomatoes_critic: 5, rotten_tomatoes_audience: 6,
@@ -134,13 +134,13 @@ function updateGlobalStyles() {
     document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
 
     let rules = `
-        /* UPDATED: inline-flex to sit next to parental rating */
+        /* UPDATED: inline-flex, with default margin-left to separate from Ends At */
         .mdblist-rating-container {
             display: inline-flex; 
             align-items: center;
             justify-content: flex-start; 
             width: auto;
-            margin-left: 10px; 
+            margin-left: 12px; 
             margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
@@ -149,6 +149,7 @@ function updateGlobalStyles() {
             pointer-events: auto !important; 
             flex-shrink: 0;
             min-height: 24px;
+            vertical-align: middle;
         }
         .mdbl-rating-item {
             display: inline-flex; align-items: center; margin: 0 6px; gap: 6px;
@@ -174,13 +175,16 @@ function updateGlobalStyles() {
             white-space: nowrap; font-family: monospace; font-weight: bold;
         }
 
+        /* Ensure parent containers allow overflow for tooltips/popups */
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
-        #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; }
         
-        /* Ensures the official rating is visible to place next to it */
-        .mediaInfoOfficialRating { display: inline-flex !important; }
+        /* Ends At style */
+        #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
         
-        /* Hides default stars */
+        /* Ensure the official rating acts like an inline item */
+        .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
+        
+        /* Hides default stars/ratings */
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
     `;
 
@@ -288,7 +292,7 @@ function updateEndsAt() {
         }
     }
     
-    // Cleanup old rating elements we want to hide
+    // Hide old native "Ends at" text so we can control placement with #customEndsAt
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -310,8 +314,12 @@ function updateEndsAt() {
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
-            // Insert at the very end of the line
-            primary.appendChild(span);
+            
+            // KEY FIX: Insert customEndsAt BEFORE ratings container if it exists.
+            // This ensures order: [Metadata] [Ends At] [Ratings]
+            const rc = primary.querySelector('.mdblist-rating-container');
+            if (rc) primary.insertBefore(span, rc); 
+            else primary.appendChild(span);
         }
         span.textContent = `Ends at ${timeStr}`;
         span.style.display = ''; 
@@ -531,7 +539,7 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === SCANNER LOGIC (UPDATED FOR INLINE PLACEMENT) ===
+// === SCANNER LOGIC (UPDATED FOR INLINE FIX) ===
 function scan() {
     updateEndsAt();
     
@@ -565,30 +573,29 @@ function scan() {
 }
 
 function injectContainer(id, type, apiMode) {
-    // 1. Find the ideal target: The official parental rating
+    // 1. Find the official rating to locate the correct metadata ROW
     let target = document.querySelector('.mediaInfoOfficialRating');
-    let insertMode = 'after'; // Insert immediately after the official rating
+    let parent = null;
 
-    // 2. Fallback: If no official rating, look for standard metadata wrapper (Jellyfin/Emby standard)
-    if (!target || target.offsetParent === null) {
+    if (target && target.offsetParent !== null) {
+        // If we found the rating, use its PARENT as the container
+        parent = target.parentNode; 
+    } else {
+        // Fallback: search for itemMiscInfo
          const allWrappers = document.querySelectorAll('.itemMiscInfo');
          for (const el of allWrappers) {
              if (el.offsetParent !== null) { 
-                 target = el; 
-                 insertMode = 'append'; 
+                 parent = el; 
                  break; 
              }
          }
     }
 
-    if (!target) return;
+    if (!parent) return;
 
-    // Check if we already have a container here (cleanup)
-    const parent = (insertMode === 'after') ? target.parentNode : target;
+    // Check if we already have a container here
     const existing = parent.querySelector('.mdblist-rating-container');
-    
     if (existing) {
-        // If it's already there for the same ID, do nothing
         if (existing.dataset.tmdbId === id) return;
         existing.remove();
     }
@@ -597,14 +604,10 @@ function injectContainer(id, type, apiMode) {
     container.className = 'mdblist-rating-container';
     container.dataset.tmdbId = id; 
     
-    if (insertMode === 'after') {
-        target.insertAdjacentElement('afterend', container);
-        // Remove any old/duplicate containers that might follow immediately (cleanup logic from other script)
-        const next = container.nextElementSibling;
-        if (next && next.classList.contains('mdblist-rating-container')) next.remove();
-    } else {
-        target.appendChild(container);
-    }
+    // KEY FIX: Just append to parent. 
+    // This places it INSIDE the flex/block container, preventing it from breaking to a new line (unless the row is full).
+    // And since 'updateEndsAt' now inserts Time BEFORE this container, the order will be correct.
+    parent.appendChild(container);
     
     renderGearIcon(container, 'Loading...');
     fetchRatings(container, id, type, apiMode);
