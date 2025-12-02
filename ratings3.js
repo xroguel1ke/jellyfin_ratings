@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.8 — Hit-Area Fix)
+// @name          Jellyfin Ratings (v10.2.9 — Stability Fix)
 // @namespace     https://mdblist.com
-// @version       10.2.8
-// @description   Clean code. Fixes Menu. Fixes Bouncing via static ::before overlay. Smart Tooltips via ::after.
+// @version       10.2.9
+// @description   Fixes Bouncing after save. Larger Tooltips. Enforces Color Icons.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.8 loading...');
+console.log('[Jellyfin Ratings] v10.2.9 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -135,6 +135,8 @@ function updateGlobalStyles() {
             margin-top: ${CFG.spacing.ratingsTopGapPx}px;
             box-sizing: border-box;
             transform: translate(var(--mdbl-x), var(--mdbl-y));
+            /* FIX BOUNCING: Hardware-Beschleunigung für den Container */
+            will-change: transform; 
             z-index: 2000; 
             position: relative; 
             pointer-events: auto !important; 
@@ -151,33 +153,29 @@ function updateGlobalStyles() {
             z-index: 10;
         }
 
-        /* FIX BOUNCING: "Das Schutzschild" 
-           ::before legt sich als unsichtbare Fläche über das Icon.
-           Es bleibt stabil stehen, auch wenn sich das Icon darunter bewegt.
-           Die Maus interagiert nur mit diesem Schild -> kein Flackern.
-        */
+        /* FIX BOUNCING: Static Hit-Box Overlay */
         .mdbl-rating-item::before {
             content: '';
             position: absolute;
-            top: -5px; bottom: -5px; left: -5px; right: -5px; /* Etwas größer als das Icon */
-            z-index: 50; /* Über dem Bild */
+            top: -10px; bottom: -10px; left: -5px; right: -5px; 
+            z-index: 50; 
             background: transparent;
         }
         
-        /* Deaktiviert Maus-Events auf dem animierten Inhalt, damit ::before übernimmt */
+        /* FIX BOUNCING: Inner elements ignore mouse */
         .mdbl-inner {
             display: flex; align-items: center; gap: 6px;
             transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             transform-origin: center center;
             will-change: transform;
             backface-visibility: hidden;
-            pointer-events: none; 
+            pointer-events: none !important; 
             position: relative;
             z-index: 10;
         }
 
         .mdbl-rating-item:hover { 
-            z-index: 20; 
+            z-index: 60; /* Higher than before overlay */
         }
         
         .mdbl-rating-item:hover .mdbl-inner {
@@ -186,29 +184,28 @@ function updateGlobalStyles() {
         .mdbl-rating-item img { height: 1.3em; vertical-align: middle; }
         .mdbl-rating-item span { font-size: 1em; vertical-align: middle; }
 
-        /* CUSTOM TOOLTIPS (Nutzt ::after, daher brauchten wir ::before für den Fix oben) */
+        /* CUSTOM TOOLTIPS (Larger) */
         .mdbl-rating-item[data-title]:hover::after {
             content: attr(data-title);
             position: absolute;
-            bottom: 125%; 
+            bottom: 130%; 
             left: 50%;
             transform: translateX(-50%);
             background: rgba(15, 15, 18, 0.98);
             border: 1px solid rgba(255,255,255,0.15);
             color: #eaeaea;
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 12px;
+            padding: 8px 12px; /* Größeres Padding */
+            border-radius: 8px;
+            font-size: 14px;   /* Größere Schrift */
             font-family: sans-serif;
             font-weight: 500;
             white-space: nowrap;
             z-index: 999999;
             pointer-events: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.6);
             backdrop-filter: blur(4px);
         }
         
-        /* Tooltip nach links verschieben wenn am rechten Rand (letzte 2 Items) */
         .mdbl-rating-item:nth-last-child(-n+2)[data-title]:hover::after {
             left: auto;
             right: -5px;
@@ -235,7 +232,6 @@ function updateGlobalStyles() {
         
         .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
         
-        /* Force hiding of default ratings */
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { 
             display: none !important; 
             opacity: 0 !important;
@@ -273,8 +269,11 @@ function refreshDomElements() {
         const color = getRatingColor(CFG.display.colorBands, CFG.display.colorChoice, score);
         const img = el.querySelector('img');
         const span = el.querySelector('span');
-        if (CFG.display.colorIcons) img.style.filter = `drop-shadow(0 0 3px ${color})`;
-        else img.style.filter = '';
+        
+        // FIX COLOR ICONS: !important added to force override
+        if (CFG.display.colorIcons) img.style.setProperty('filter', `drop-shadow(0 0 3px ${color})`, 'important');
+        else img.style.removeProperty('filter');
+        
         if (CFG.display.colorNumbers) span.style.color = color;
         else span.style.color = '';
         const text = CFG.display.showPercentSymbol ? `${Math.round(score)}%` : `${Math.round(score)}`;
@@ -335,7 +334,6 @@ function updateEndsAt() {
         if (el.offsetParent !== null) { primary = el; break; }
     }
     
-    // Aggressive hiding of defaults
     document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
         el.style.display = 'none';
         el.style.visibility = 'hidden';
@@ -358,7 +356,6 @@ function updateEndsAt() {
         }
     }
     
-    // Hide old native "Ends at" text
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -374,8 +371,6 @@ function updateEndsAt() {
 
     let span = document.getElementById('customEndsAt');
     
-    // We want the order: [Official Rating] -> [Ends At] -> [MDB Ratings]
-    // 1. Find Official Rating
     const officialRating = document.querySelector('.mediaInfoOfficialRating');
     
     if (minutes > 0) {
@@ -387,19 +382,15 @@ function updateEndsAt() {
         span.textContent = `Ends at ${timeStr}`;
         span.style.display = '';
 
-        // PLACEMENT LOGIC
         if (officialRating && officialRating.parentNode) {
-            // Insert AFTER official rating
             officialRating.insertAdjacentElement('afterend', span);
         } else {
-             // Fallback
              if(!primary.contains(span)) primary.appendChild(span);
         }
     } else {
         if(span) span.style.display = 'none';
     }
     
-    // If we have a ratings container, ensure it is AFTER customEndsAt
     const rc = document.querySelector('.mdblist-rating-container');
     if (rc && span && span.parentNode) {
         span.insertAdjacentElement('afterend', rc);
