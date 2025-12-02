@@ -1,13 +1,12 @@
 // ==UserScript==
-// @name         Jellyfin Ratings (v10.2.3 — Headers Fix)
+// @name         Jellyfin Ratings (v10.2.4 — Native Fetch & Inline Fix)
 // @namespace    https://mdblist.com
-// @version      10.2.3
-// @description  Fixes 405 Errors by anonymizing GM requests and resolves "not loading" CSP issues.
+// @version      10.2.4
+// @description  Uses native fetch (like other user script) to fix API errors. Enforces inline placement: Parental > EndsAt > Ratings.
 // @match        *://*/*
-// @grant        GM_xmlhttpRequest
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.2.3 loading...');
+console.log('[Jellyfin Ratings] v10.2.4 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -114,15 +113,6 @@ function saveConfig() {
    2. UTILITIES & STYLES
 ========================================================================== */
 
-if (typeof GM_xmlhttpRequest === 'undefined') {
-    const PROXIES = ['https://api.allorigins.win/raw?url=', 'https://api.codetabs.com/v1/proxy?quest='];
-    window.GM_xmlhttpRequest = ({ method = 'GET', url, onload, onerror }) => {
-        const useProxy = !url.includes('mdblist.com') && !url.includes('graphql.anilist.co');
-        const finalUrl = useProxy ? PROXIES[Math.floor(Math.random() * PROXIES.length)] + encodeURIComponent(url) : url;
-        fetch(finalUrl).then(r => r.text().then(t => onload && onload({ status: r.status, responseText: t }))).catch(e => onerror && onerror(e));
-    };
-}
-
 const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
 const styleEl = document.createElement('style');
@@ -134,7 +124,6 @@ function updateGlobalStyles() {
     document.documentElement.style.setProperty('--mdbl-y', `${CFG.display.posY}px`);
 
     let rules = `
-        /* UPDATED: inline-flex, with default margin-left to separate from Ends At */
         .mdblist-rating-container {
             display: inline-flex; 
             align-items: center;
@@ -175,17 +164,21 @@ function updateGlobalStyles() {
             white-space: nowrap; font-family: monospace; font-weight: bold;
         }
 
-        /* Ensure parent containers allow overflow for tooltips/popups */
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
         
-        /* Ends At style */
         #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
         
-        /* Ensure the official rating acts like an inline item */
         .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
         
-        /* Hides default stars/ratings */
-        .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
+        /* Force hiding of default ratings */
+        .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { 
+            display: none !important; 
+            opacity: 0 !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            height: 0 !important;
+            overflow: hidden !important;
+        }
     `;
 
     Object.keys(CFG.priorities).forEach(key => {
@@ -276,6 +269,14 @@ function updateEndsAt() {
     for (const el of allWrappers) {
         if (el.offsetParent !== null) { primary = el; break; }
     }
+    
+    // Aggressive hiding of defaults
+    document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
+        el.style.display = 'none';
+        el.style.visibility = 'hidden';
+        el.style.width = '0px';
+    });
+
     if (!primary) return; 
 
     let minutes = 0;
@@ -292,7 +293,7 @@ function updateEndsAt() {
         }
     }
     
-    // Hide old native "Ends at" text so we can control placement with #customEndsAt
+    // Hide old native "Ends at" text
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -301,30 +302,44 @@ function updateEndsAt() {
             if (el.classList.contains('mediaInfoOfficialRating')) return;
             const t = (el.textContent || '').toLowerCase();
             if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
-                 if (minutes > 0) el.style.display = 'none';
-                 else el.style.display = ''; 
+                 el.style.display = 'none';
             }
         });
     }
-    document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
 
+    let span = document.getElementById('customEndsAt');
+    
+    // We want the order: [Official Rating] -> [Ends At] -> [MDB Ratings]
+    // 1. Find Official Rating
+    const officialRating = document.querySelector('.mediaInfoOfficialRating');
+    
     if (minutes > 0) {
         const timeStr = formatTime(minutes);
-        let span = primary.querySelector('#customEndsAt');
         if (!span) {
             span = document.createElement('div');
             span.id = 'customEndsAt';
-            
-            // Insert customEndsAt BEFORE ratings container if it exists.
-            const rc = primary.querySelector('.mdblist-rating-container');
-            if (rc) primary.insertBefore(span, rc); 
-            else primary.appendChild(span);
         }
         span.textContent = `Ends at ${timeStr}`;
-        span.style.display = ''; 
+        span.style.display = '';
+
+        // PLACEMENT LOGIC
+        if (officialRating && officialRating.parentNode) {
+            // Insert AFTER official rating
+            officialRating.insertAdjacentElement('afterend', span);
+        } else {
+             // Fallback
+             if(!primary.contains(span)) primary.appendChild(span);
+        }
     } else {
-        const span = primary.querySelector('#customEndsAt');
-        if(span) span.remove();
+        if(span) span.style.display = 'none';
+    }
+    
+    // If we have a ratings container, ensure it is AFTER customEndsAt
+    const rc = document.querySelector('.mdblist-rating-container');
+    if (rc && span && span.parentNode) {
+        span.insertAdjacentElement('afterend', rc);
+    } else if (rc && officialRating) {
+        officialRating.insertAdjacentElement('afterend', rc);
     }
 }
 
@@ -445,7 +460,6 @@ function renderRatings(container, data, pageImdbId, type) {
         html += createRatingHtml(k, v, safeLink, c, tit, kind);
     };
 
-    const fallbackSlug = localSlug(data.title || '');
     let masterSum = 0, masterCount = 0;
     const trackMaster = (val, scaleKey) => { if (val !== null && !isNaN(parseFloat(val))) { masterSum += parseFloat(val) * (SCALE[scaleKey] || 1); masterCount++; } };
 
@@ -506,33 +520,22 @@ function fetchRatings(container, id, type, apiMode) {
     container.dataset.fetching = 'true';
     updateStatus(container, `Fetching ${apiMode.toUpperCase()}...`);
     
-    // FIX FOR 405: Use anonymous:true to strip headers like Origin/Referer that MDBList might reject.
-    GM_xmlhttpRequest({
-        method: 'GET', 
-        url: apiUrl,
-        anonymous: true,  // <--- KEY FIX
-        onload: r => {
+    // NATIVE FETCH (Reverted to this to fix 405 error)
+    fetch(apiUrl)
+        .then(response => {
+            if (!response.ok) throw new Error(String(response.status));
+            return response.json();
+        })
+        .then(d => {
             container.dataset.fetching = 'false';
-            if (r.status !== 200) { 
-                console.error('[MDBList] API Error:', r.status, r.responseText);
-                updateStatus(container, `API ${r.status}`, '#e53935');
-                return;
-            }
-            try {
-                const d = JSON.parse(r.responseText);
-                localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
-                renderRatings(container, d, currentImdbId, type);
-            } catch(e) { 
-                console.error('[MDBList] Parse Error', e); 
-                updateStatus(container, 'Parse Err', '#e53935');
-            }
-        },
-        onerror: e => { 
-            container.dataset.fetching = 'false'; 
-            console.error('[MDBList] Net Error', e); 
-            updateStatus(container, 'Net Err', '#e53935');
-        }
-    });
+            localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
+            renderRatings(container, d, currentImdbId, type);
+        })
+        .catch(e => {
+            container.dataset.fetching = 'false';
+            console.error('[MDBList] API Error:', e.message || e);
+            updateStatus(container, `API ${e.message || 'Err'}`, '#e53935');
+        });
 }
 
 function getJellyfinId() {
@@ -541,7 +544,7 @@ function getJellyfinId() {
     return params.get('id');
 }
 
-// === SCANNER LOGIC (FIXED RACE CONDITION) ===
+// === SCANNER LOGIC ===
 function scan() {
     updateEndsAt();
     
@@ -598,15 +601,7 @@ function injectContainer(id, type, apiMode) {
     // Check if we already have a container here
     const existing = parent.querySelector('.mdblist-rating-container');
     if (existing) {
-        if (existing.dataset.tmdbId === id) {
-             // If we already have the container for this ID, check if it's stuck loading (retry logic)
-             if (existing.dataset.fetching === 'true' && !existing.querySelector('.mdbl-settings-btn')) {
-                 // It's seemingly stuck (no settings btn means initial load not finished). 
-                 // We could force a re-fetch here, but let's let the user refresh page for now to avoid loops.
-                 return;
-             }
-             return;
-        }
+        if (existing.dataset.tmdbId === id) return;
         
         // PRIORITY FIX: If existing is TMDb and new is IMDb, ignore IMDb to prevent overwriting/flashing
         if (existing.dataset.source === 'tmdb' && apiMode === 'imdb') return;
@@ -617,10 +612,17 @@ function injectContainer(id, type, apiMode) {
     const container = document.createElement('div');
     container.className = 'mdblist-rating-container';
     container.dataset.tmdbId = id; 
-    container.dataset.source = apiMode; // Mark source for priority check
+    container.dataset.source = apiMode; 
     
-    // Just append to parent. 
-    parent.appendChild(container);
+    // We want to insert this AFTER customEndsAt if possible
+    const endsAt = document.getElementById('customEndsAt');
+    if (endsAt && endsAt.parentNode === parent) {
+        endsAt.insertAdjacentElement('afterend', container);
+    } else if (target && target.parentNode === parent) {
+        target.insertAdjacentElement('afterend', container);
+    } else {
+        parent.appendChild(container);
+    }
     
     renderGearIcon(container, 'Loading...');
     fetchRatings(container, id, type, apiMode);
