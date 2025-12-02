@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.2.5 — Fix Hover Bounce)
+// @name          Jellyfin Ratings (v10.2.5 — Clean Bounce Fix)
 // @namespace     https://mdblist.com
 // @version       10.2.5
-// @description   Uses native fetch (like other user script) to fix API errors. Enforces inline placement: Parental > EndsAt > Ratings. Fixes hover bouncing.
+// @description   Uses native fetch. Enforces inline placement. Fixes hover bouncing via pointer-events. Adjusted Defaults.
 // @match         *://*/*
 // ==/UserScript==
 
@@ -21,7 +21,8 @@ const DEFAULTS = {
         anilist: true, myanimelist: true
     },
     display: {
-        showPercentSymbol: true, colorNumbers: true, colorIcons: false,
+        // GEÄNDERT: Defaults auf false gesetzt wie gewünscht
+        showPercentSymbol: false, colorNumbers: false, colorIcons: false,
         posX: 0, posY: 0,
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
@@ -155,7 +156,9 @@ function updateGlobalStyles() {
             transform-origin: center center;
             will-change: transform;
             backface-visibility: hidden;
-            pointer-events: none; /* FIX: Prevents bouncing by ignoring mouse on transformed child */
+            /* FIX: Hier liegt die Lösung. Wir deaktivieren Maus-Events auf dem
+               sich bewegenden Teil, damit der Hover-Status des Parents stabil bleibt. */
+            pointer-events: none; 
         }
         .mdbl-rating-item:hover { 
             z-index: 2147483647; 
