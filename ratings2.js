@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.3.4 — Static & Stable)
+// @name          Jellyfin Ratings (v10.3.5 — Centered Gear)
 // @namespace     https://mdblist.com
-// @version       10.3.4
-// @description   Completely removed hover animations (zoom/tilt) to fix bouncing. Clean config. Stable menu.
+// @version       10.3.5
+// @description   Fixed gear icon alignment/centering. Removed hover animations. Clean config. Stable menu.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] v10.3.4 loading...');
+console.log('[Jellyfin Ratings] v10.3.5 loading...');
 
 /* ==========================================================================
    1. CONFIGURATION
@@ -193,9 +193,15 @@ function updateGlobalStyles() {
         }
         
         .mdbl-settings-btn {
-            opacity: 0.6; margin-right: 8px; border-right: 1px solid rgba(255,255,255,0.2); 
-            padding: 4px 8px 4px 0; cursor: pointer !important; pointer-events: auto !important;
-            order: -9999 !important; display: inline-flex;
+            opacity: 0.6; 
+            margin-right: 8px; 
+            border-right: 1px solid rgba(255,255,255,0.2); 
+            padding: 4px; /* FIX: Symmetrical padding centers the icon */
+            cursor: pointer !important; 
+            pointer-events: auto !important;
+            order: -9999 !important; 
+            display: inline-flex;
+            justify-content: center; /* Ensure contents are centered */
         }
         .mdbl-settings-btn:hover { opacity: 1; }
         .mdbl-settings-btn:hover .mdbl-inner { } /* No scale here either */
@@ -506,8 +512,8 @@ function renderRatings(container, data, pageImdbId, type) {
         tmdb: data.ids?.tmdb || data.id || data.tmdbid || data.tmdb_id, 
         trakt: data.ids?.trakt || data.traktid || data.trakt_id, 
         slug: data.ids?.slug || data.slug,
-        mal: data.ids?.mal,            
-        anilist: data.ids?.anilist     
+        mal: data.ids?.mal,              
+        anilist: data.ids?.anilist      
     };
     
     const add = (k, v, apiLink, c, tit, kind) => {
@@ -642,13 +648,13 @@ function injectContainer(id, type, apiMode) {
         parent = target.parentNode; 
     } else {
         // Fallback: search for itemMiscInfo
-         const allWrappers = document.querySelectorAll('.itemMiscInfo');
-         for (const el of allWrappers) {
-             if (el.offsetParent !== null) { 
-                 parent = el; 
-                 break; 
-             }
-         }
+          const allWrappers = document.querySelectorAll('.itemMiscInfo');
+          for (const el of allWrappers) {
+              if (el.offsetParent !== null) { 
+                  parent = el; 
+                  break; 
+              }
+          }
     }
 
     if (!parent) return;
