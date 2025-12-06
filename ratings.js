@@ -20,7 +20,7 @@ const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 Hours
 // API Keys
 const INJ_KEYS = (window.MDBL_KEYS || {});
 const LS_KEYS = JSON.parse(localStorage.getItem(`${NS}keys`) || '{}');
-const API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || 'hehfnbo9y8blfyqm1d37ikubl');
+const API_KEY = String(INJ_KEYS.MDBLIST || LS_KEYS.MDBLIST || '');
 
 const DEFAULTS = {
     sources: {
