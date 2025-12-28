@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.8.0 — Final Math & Menu Fix)
+// @name          Jellyfin Ratings (v11.9.0 — Fix RT Links)
 // @namespace     https://mdblist.com
-// @version       11.8.0
-// @description   Restores correct 1-100 scaling, fixes drag & drop live preview, ensures 'Ends At' is first, and reloads on save.
+// @version       11.9.0
+// @description   Fixes broken Rotten Tomatoes links (removes double /m/), keeps all other features stable.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.8.0...');
+console.log('[Jellyfin Ratings] Loading v11.9.0...');
 
 (function() {
     'use strict';
@@ -47,13 +47,10 @@ console.log('[Jellyfin Ratings] Loading v11.8.0...');
     };
 
     // ORIGINAL SCALE FACTORS (Correct 1-100 calc)
-    // TMDB, Trakt, RT, Meta are usually returned as 0-100 or scaled by MDBList already
-    // IMDb, MAL, MetaUser are 0-10 -> x10
-    // Letterboxd is 0-5 -> x20
     const SCALE = {
         master: 1, 
         imdb: 10, 
-        tmdb: 1, // Was 10 in bad version, reverted to 1
+        tmdb: 1, 
         trakt: 1, 
         letterboxd: 20, 
         roger_ebert: 25,
@@ -269,7 +266,11 @@ console.log('[Jellyfin Ratings] Loading v11.8.0...');
             case 'metacritic_critic':
             case 'metacritic_user': return `https://www.metacritic.com/${safeType}/${localSlug(title)}`;
             case 'rotten_tomatoes_critic':
-            case 'rotten_tomatoes_audience': return sLink.length > 2 ? `https://www.rottentomatoes.com/m/${sLink}` : '#';
+            case 'rotten_tomatoes_audience': 
+                // ORIGINAL FIX: Check for leading slash
+                if (sLink.startsWith('/')) return `https://www.rottentomatoes.com${sLink}`;
+                return sLink.length > 2 ? `https://www.rottentomatoes.com/m/${sLink}` : '#';
+            
             case 'anilist': return ids.anilist ? `https://anilist.co/anime/${ids.anilist}` : `https://anilist.co/search/anime?search=${safeTitle}`;
             case 'myanimelist': return ids.mal ? `https://myanimelist.net/anime/${ids.mal}` : `https://myanimelist.net/anime.php?q=${safeTitle}`;
             case 'roger_ebert': return sLink.length > 2 ? `https://www.rogerebert.com/reviews/${sLink}` : `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}`;
@@ -306,7 +307,7 @@ console.log('[Jellyfin Ratings] Loading v11.8.0...');
             const val = parseFloat(rawVal);
             if (isNaN(val)) return;
             
-            // Correct Math (1-100)
+            // Original scaling
             const score = val * (SCALE[key] || 1);
 
             masterSum += score;
@@ -456,7 +457,7 @@ console.log('[Jellyfin Ratings] Loading v11.8.0...');
     scanAndProcessLinks();
 
     /* ==========================================================================
-       6. SETTINGS MENU (Fixed Drag)
+       6. SETTINGS MENU (Header Drag Only)
     ========================================================================== */
     function initMenu() {
         if(document.getElementById('mdbl-panel')) return;
