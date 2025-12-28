@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.4.0 — Episode Toggle)
+// @name          Jellyfin Ratings (v10.5.0 — Stable & Episode Toggle)
 // @namespace     https://mdblist.com
-// @version       10.4.0
-// @description   Displays ratings from multiple sources with a settings panel. Includes Episode/Series toggle.
+// @version       10.5.0
+// @description   Displays ratings from multiple sources with a settings panel. Includes safe Episode/Series toggle & stale data fix.
 // @match         *://*/*
 // ==/UserScript==
 
@@ -31,7 +31,7 @@ const DEFAULTS = {
     display: {
         showPercentSymbol: false,
         colorNumbers: false,
-        showEpisodeRatings: false, // False = Show Series Rating on Episode pages
+        showEpisodeRatings: false, // Toggle state
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true
@@ -98,7 +98,6 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        // Deep merge to ensure structure
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: {
@@ -156,7 +155,6 @@ function updateGlobalStyles() {
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; opacity: 0 !important; visibility: hidden !important; width: 0 !important; height: 0 !important; overflow: hidden !important; }
     `;
 
-    // Dynamic Priority Rules
     Object.keys(CFG.priorities).forEach(key => {
         const isEnabled = CFG.sources[key];
         const order = CFG.priorities[key];
@@ -181,13 +179,10 @@ function refreshDomElements() {
     document.querySelectorAll('.mdbl-rating-item:not(.mdbl-settings-btn)').forEach(el => {
         const score = parseFloat(el.dataset.score);
         if (isNaN(score)) return;
-        
         const color = getRatingColor(CFG.display.colorBands, CFG.display.colorChoice, score);
         const span = el.querySelector('span');
-
         el.querySelector('img').style.removeProperty('filter');
         span.style.color = CFG.display.colorNumbers ? color : '';
-        
         const text = CFG.display.showPercentSymbol ? `${Math.round(score)}%` : `${Math.round(score)}`;
         if (span.textContent !== text) span.textContent = text;
     });
@@ -210,14 +205,12 @@ function formatTime(minutes) {
 
 function parseRuntimeToMinutes(text) {
     if (!text) return 0;
-    // Check "2 h 10 min" format
     let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
     if (m && (m[1] || m[2])) {
         const h = parseInt(m[1] || '0', 10);
         const min = parseInt(m[2] || '0', 10);
         if (h > 0 || min > 0) return h * 60 + min;
     }
-    // Check "130 min" format
     m = text.match(/(\d+)\s*(?:m|min)\w*/i);
     if (m) return parseInt(m[1], 10);
     return 0;
@@ -295,7 +288,7 @@ function updateEndsAt() {
 }
 
 /* ==========================================================================
-   5. LINK GENERATION (STRICT)
+   5. LINK GENERATION
 ========================================================================== */
 
 function generateLink(key, ids, apiLink, type, title) {
@@ -308,36 +301,28 @@ function generateLink(key, ids, apiLink, type, title) {
     switch(key) {
         case 'imdb': return ids.imdb ? `https://www.imdb.com/title/${ids.imdb}/` : '#';
         case 'tmdb': return ids.tmdb ? `https://www.themoviedb.org/${safeType}/${ids.tmdb}` : '#';
-        
         case 'trakt': 
-             // FIX: Explicitly handle 'shows' vs 'movies' for Trakt URL
              const traktType = (safeType === 'tv') ? 'shows' : 'movies';
              return ids.trakt ? `https://trakt.tv/${traktType}/${ids.trakt}` : (ids.imdb ? `https://trakt.tv/search/imdb/${ids.imdb}` : '#');
-
         case 'letterboxd': return (sLink.includes('/film/') || sLink.includes('/slug/')) ? `https://letterboxd.com${sLink.startsWith('/') ? '' : '/'}${sLink}` : (ids.imdb ? `https://letterboxd.com/imdb/${ids.imdb}/` : '#');
-
         case 'metacritic_critic':
         case 'metacritic_user':
             if (sLink.startsWith('/movie/') || sLink.startsWith('/tv/')) return `https://www.metacritic.com${sLink}`;
             const slug = localSlug(title);
             return slug ? `https://www.metacritic.com/${safeType}/${slug}` : '#';
-
         case 'rotten_tomatoes_critic':
         case 'rotten_tomatoes_audience':
             if (sLink.startsWith('/')) return `https://www.rottentomatoes.com${sLink}`;
             if (sLink.length > 2) return `https://www.rottentomatoes.com/m/${sLink}`;
             return '#';
-
         case 'anilist':
             if (ids.anilist) return `https://anilist.co/anime/${ids.anilist}`;
             if (/^\d+$/.test(sLink)) return `https://anilist.co/anime/${sLink}`;
             return `https://anilist.co/search/anime?search=${safeTitle}`;
-
         case 'myanimelist':
             if (ids.mal) return `https://myanimelist.net/anime/${ids.mal}`;
             if (/^\d+$/.test(sLink)) return `https://myanimelist.net/anime/${sLink}`;
             return `https://myanimelist.net/anime.php?q=${safeTitle}`;
-
         case 'roger_ebert':
              if (sLink && sLink.length > 2 && sLink !== '#') {
                  if (sLink.startsWith('http')) return sLink;
@@ -346,7 +331,6 @@ function generateLink(key, ids, apiLink, type, title) {
                  return `https://www.rogerebert.com${path}`;
              }
              return `https://duckduckgo.com/?q=!ducky+site:rogerebert.com/reviews+${safeTitle}`;
-
         default: return '#';
     }
 }
@@ -463,27 +447,15 @@ function renderRatings(container, data, pageImdbId, type) {
     }
 }
 
-function fetchRatings(container, id, type, apiMode, season, episode) {
+function fetchRatings(container, id, type, apiMode) {
     if (container.dataset.fetching === 'true') return;
     
-    // BUILD URL
-    let apiUrl;
-    if (apiMode === 'imdb') {
-        apiUrl = `${API_BASE}/imdb/${id}?apikey=${API_KEY}`;
-    } else {
-        // TMDB logic
-        if (season && episode) {
-             // Attempt to fetch episode if parameters are present (and toggle was ON)
-             // Note: Standard MDBList endpoint for TV is /tmdb/tv/{id}. 
-             // To support episodes, usually one relies on IMDb ID. 
-             // If we are here, we are trying best-effort for episode.
-             apiUrl = `${API_BASE}/tmdb/${type}/${id}/season/${season}/episode/${episode}?apikey=${API_KEY}`;
-        } else {
-             apiUrl = `${API_BASE}/tmdb/${type}/${id}?apikey=${API_KEY}`;
-        }
-    }
-
-    const cacheKey = `${NS}c_${id}_${season||''}_${episode||''}`;
+    // URL Construction
+    const apiUrl = (apiMode === 'imdb') 
+        ? `${API_BASE}/imdb/${id}?apikey=${API_KEY}` 
+        : `${API_BASE}/tmdb/${type}/${id}?apikey=${API_KEY}`;
+        
+    const cacheKey = `${NS}c_${id}`;
 
     // Cache check
     try {
@@ -513,127 +485,108 @@ function fetchRatings(container, id, type, apiMode, season, episode) {
         .catch(e => {
             container.dataset.fetching = 'false';
             console.error('[MDBList] API Error:', e.message || e);
-            
-            // Fallback: If 404/405 on Episode fetch, user might want to know, but we could fallback to show?
-            // For now, display error as user requested toggle.
             updateStatus(container, `API ${e.message || 'Err'}`, '#e53935');
         });
 }
 
-// === SCANNER ===
+// === SCANNER (Fixed for Visibility & Stale Data) ===
 function scan() {
     updateEndsAt();
 
-    // 1. Look for TMDB links
-    // Check if we already processed this specific link to avoid loops, but re-check if settings changed?
-    // Current logic uses dataset.mdblProcessed.
-    const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
-    if (tmdbLinks.length > 0) {
-        const link = tmdbLinks[0];
-        link.dataset.mdblProcessed = "true";
+    // Helper: Find first visible element in the DOM
+    const findVisible = (selector) => {
+        const els = document.querySelectorAll(selector);
+        for (const el of els) {
+            if (el.offsetParent !== null) return el;
+        }
+        return null;
+    };
+
+    // 1. Check for IMDb link (Best for Episode Ratings if enabled)
+    const imdbLink = findVisible('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
+    if (imdbLink && CFG.display.showEpisodeRatings) {
+        imdbLink.dataset.mdblProcessed = "true";
+        const m = imdbLink.href.match(/tt\d+/);
+        if (m) {
+            // If toggle is ON, we assume IMDb link on this page points to the item we want (episode)
+            injectContainer(m[0], 'movie', 'imdb', imdbLink);
+            return;
+        }
+    }
+
+    // 2. Check for TMDb link
+    const tmdbLink = findVisible('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
+    if (tmdbLink) {
+        tmdbLink.dataset.mdblProcessed = "true";
         
-        // Regex for Episode: /tv/123/season/1/episode/1
-        const mEp = link.href.match(/\/tv\/(\d+)\/season\/(\d+)\/episode\/(\d+)/);
-        // Regex for Show/Movie
-        const mBase = link.href.match(/\/(movie|tv)\/(\d+)/);
+        const mEp = tmdbLink.href.match(/\/tv\/(\d+)\/season\/(\d+)\/episode\/(\d+)/);
+        const mBase = tmdbLink.href.match(/\/(movie|tv)\/(\d+)/);
 
         if (mEp) {
-            // It is an episode
+            // It is an episode link
             const showId = mEp[1];
-            const season = mEp[2];
-            const episode = mEp[3];
             
             if (CFG.display.showEpisodeRatings) {
-                // User WANTS Episode Ratings
-                // Use the show ID but pass season/episode params to fetcher
-                injectContainer(showId, 'show', 'tmdb', season, episode);
+                // Toggle is ON, but we only have a TMDB link.
+                // We CANNOT fetch episode ratings via TMDB ID easily on MDBList without error.
+                // Fallback: Show Series rating instead of crashing.
+                injectContainer(showId, 'show', 'tmdb', tmdbLink);
             } else {
-                // User WANTS Series Ratings (Toggle OFF)
-                // Force Show ID and 'show' type. Ignore season/episode.
-                injectContainer(showId, 'show', 'tmdb');
+                // Toggle is OFF: Show Series rating
+                injectContainer(showId, 'show', 'tmdb', tmdbLink);
             }
         } 
         else if (mBase) {
-            // Standard Show or Movie
-            injectContainer(mBase[2], mBase[1] === 'tv' ? 'show' : 'movie', 'tmdb');
+            // Standard Show/Movie link
+            injectContainer(mBase[2], mBase[1] === 'tv' ? 'show' : 'movie', 'tmdb', tmdbLink);
         }
+        return;
     }
 
-    // 2. Look for IMDb links
-    const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
-    if (imdbLinks.length > 0) {
-        const link = imdbLinks[0];
-        link.dataset.mdblProcessed = "true";
-        const m = link.href.match(/tt\d+/);
-        
-        if (m) {
-            const imdbId = m[0];
-            // Check if we are on an episode page and user wants SERIES ratings.
-            // This is hard to detect purely from an IMDb link (tt123 can be anything).
-            // However, we can check if we ALSO found a TMDB Episode link previously on the page.
-            // But simplified logic: If user wants series ratings, and we are on an episode page, 
-            // the TMDB scan (above) usually runs first or alongside.
-            // If the user turned OFF episode ratings, we preferably want the Series ID.
-            // If we only have an IMDb ID for the episode, we can't easily get the Series ID without API.
-            // So: If showEpisodeRatings is TRUE, we load this IMDb ID (works for eps).
-            // If FALSE, we might still load it because we can't distinguish, UNLESS we already injected via TMDB.
-            
-            // Check if container already exists and has data-source='tmdb' (which implies we found the series ID).
-            const existing = document.querySelector('.mdblist-rating-container');
-            if (existing && existing.dataset.source === 'tmdb' && !CFG.display.showEpisodeRatings) {
-                 // We already have the Series rating from TMDB logic. Do not overwrite with IMDb Episode rating.
-                 return;
-            }
-            
-            injectContainer(imdbId, 'movie', 'imdb');
-        }
+    // 3. Fallback: If toggle is OFF and we skipped IMDb link above, check it now as Series fallback
+    if (imdbLink && !CFG.display.showEpisodeRatings) {
+        imdbLink.dataset.mdblProcessed = "true";
+        const m = imdbLink.href.match(/tt\d+/);
+        if (m) injectContainer(m[0], 'movie', 'imdb', imdbLink);
     }
 }
 
-function injectContainer(id, type, apiMode, season, episode) {
-    let target = document.querySelector('.mediaInfoOfficialRating');
-    let parent = (target && target.offsetParent !== null) ? target.parentNode : null;
-
-    if (!parent) {
-        const allWrappers = document.querySelectorAll('.itemMiscInfo');
-        for (const el of allWrappers) {
-            if (el.offsetParent !== null) { parent = el; break; }
-        }
+function injectContainer(id, type, apiMode, refElement) {
+    // Find the correct parent container based on the reference element (the link we found)
+    // This ensures we are injecting into the SAME view as the link, preventing stale injections.
+    let parent = null;
+    
+    // Try to find the main container relative to the link we found
+    const detailPage = refElement.closest('.detailPageWrapperContainer') || refElement.closest('.itemDetail');
+    if (detailPage) {
+        parent = detailPage.querySelector('.itemMiscInfo') || detailPage.querySelector('.mediaInfoOfficialRating')?.parentNode;
     }
+
+    // Fallback if structure is different
+    if (!parent) {
+        const target = document.querySelector('.mediaInfoOfficialRating');
+        if (target && target.offsetParent !== null) parent = target.parentNode;
+    }
+
     if (!parent) return;
 
     const existing = parent.querySelector('.mdblist-rating-container');
     if (existing) {
-        // If we are switching from Series to Episode or vice versa, we might need to re-inject.
-        // Check if ID matches.
-        if (existing.dataset.tmdbId === id && existing.dataset.season === (season||'') && existing.dataset.episode === (episode||'')) return;
-        
-        // If we found a TMDB Show ID, and existing is IMDb (which might be episode), and we want Series... replace.
-        if (apiMode === 'tmdb' && !CFG.display.showEpisodeRatings) {
-             existing.remove();
-        } else if (existing.dataset.source === 'tmdb' && apiMode === 'imdb') {
-             // Don't overwrite TMDB (Series) with IMDb (Episode) if toggle is OFF
-             if (!CFG.display.showEpisodeRatings) return;
-             existing.remove();
-        } else {
-             existing.remove();
-        }
+        if (existing.dataset.tmdbId === id) return;
+        existing.remove();
     }
 
     const container = document.createElement('div');
     container.className = 'mdblist-rating-container';
     container.dataset.tmdbId = id;
     container.dataset.source = apiMode;
-    if(season) container.dataset.season = season;
-    if(episode) container.dataset.episode = episode;
 
-    const endsAt = document.getElementById('customEndsAt');
-    if (endsAt && endsAt.parentNode === parent) endsAt.insertAdjacentElement('afterend', container);
-    else if (target && target.parentNode === parent) target.insertAdjacentElement('afterend', container);
+    const target = parent.querySelector('.mediaInfoOfficialRating') || parent.querySelector('#customEndsAt');
+    if (target) target.insertAdjacentElement('afterend', container);
     else parent.appendChild(container);
 
     renderGearIcon(container, 'Loading...');
-    fetchRatings(container, id, type, apiMode, season, episode);
+    fetchRatings(container, id, type, apiMode);
 }
 
 setInterval(scan, 500);
@@ -645,7 +598,6 @@ setInterval(scan, 500);
 function initMenu() {
     if(document.getElementById('mdbl-panel')) return;
 
-    // Static CSS for Settings Panel
     const css = `
     :root { --mdbl-right-col: 48px; }
     #mdbl-panel { position:fixed; right:16px; bottom:70px; width:500px; max-height:90vh; overflow:auto; border-radius:14px; border:1px solid rgba(255,255,255,0.15); background:rgba(22,22,26,0.94); backdrop-filter:blur(8px); color:#eaeaea; z-index:100000; box-shadow:0 20px 40px rgba(0,0,0,0.45); display:none; font-family: sans-serif; }
@@ -693,7 +645,6 @@ function initMenu() {
     panel.id = 'mdbl-panel';
     document.body.appendChild(panel);
 
-    // Draggable logic
     let isDrag = false, sx, sy, lx, ly;
     panel.addEventListener('mousedown', (e) => {
         if (window.innerWidth <= 600 || ['INPUT','SELECT','BUTTON'].includes(e.target.tagName)) return;
@@ -710,7 +661,6 @@ function initMenu() {
     });
     document.addEventListener('mouseup', () => isDrag = false);
 
-    // Click outside to close (revert)
     document.addEventListener('mousedown', (e) => {
         if (panel.style.display === 'block' && !panel.contains(e.target) && e.target.id !== 'customEndsAt' && !e.target.closest('.mdbl-settings-btn')) {
             closeSettingsMenu(false);
@@ -790,7 +740,6 @@ function renderMenuContent(panel) {
 
     panel.innerHTML = html;
 
-    // Render Source List
     const sList = panel.querySelector('#mdbl-sources');
     Object.keys(CFG.priorities).sort((a,b) => CFG.priorities[a]-CFG.priorities[b]).forEach(k => {
          if (!CFG.sources.hasOwnProperty(k)) return;
@@ -802,7 +751,6 @@ function renderMenuContent(panel) {
          sList.appendChild(div);
     });
 
-    // Event Handlers
     panel.querySelector('#mdbl-close').onclick = () => closeSettingsMenu(false);
     panel.querySelector('#mdbl-btn-save').onclick = () => closeSettingsMenu(true);
     panel.querySelector('#mdbl-btn-reset').onclick = () => { if(confirm('Reset all settings?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); } };
