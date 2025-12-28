@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.16.1 — Fixed Save & Drag)
+// @name          Jellyfin Ratings (v11.16.2 — Fix Sort & CSS)
 // @namespace     https://mdblist.com
-// @version       11.16.1
-// @description   Fixes the crash on save, enables live preview for drag-and-drop, and adds a visual save notification without reloading.
+// @version       11.16.2
+// @description   Fixes the CSS structure so that drag-and-drop reordering actually affects the visual output (display: contents fix).
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.16.1...');
+console.log('[Jellyfin Ratings] Loading v11.16.2...');
 
 (function() {
     'use strict';
@@ -136,6 +136,8 @@ console.log('[Jellyfin Ratings] Loading v11.16.1...');
             .mdbl-status-text { font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b; }
             #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
             .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
+            /* VITAL FIX: display:contents lets the children participate in the flex parent's ordering */
+            .mdbl-wrapper { display: contents; }
             /* Toast */
             .mdbl-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(30, 30, 30, 0.9); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); z-index: 100001; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
             .mdbl-toast.show { opacity: 1; }
@@ -368,6 +370,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.1...');
             }
 
             const wrapper = document.createElement('span');
+            wrapper.className = 'mdbl-wrapper'; // Added class for CSS targeting
             wrapper.innerHTML = masterHtml + itemsHtml;
             container.appendChild(wrapper);
 
