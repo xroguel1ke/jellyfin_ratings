@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.10.0 — Positioning Force Fix)
+// @name          Jellyfin Ratings (v11.12.0 — Stable Restoration)
 // @namespace     https://mdblist.com
-// @version       11.10.0
-// @description   Forces 'Ends At' before ratings on load, restores Menu clickability, keeps correct scaling and links.
+// @version       11.12.0
+// @description   Restores working menu (v11.8), fixes 'Ends At' disappearance, and enforces [Time] -> [Ratings] order.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.10.0...');
+console.log('[Jellyfin Ratings] Loading v11.12.0...');
 
 (function() {
     'use strict';
@@ -46,7 +46,7 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
         }
     };
 
-    // ORIGINAL SCALE FACTORS (Restored)
+    // ORIGINAL SCALE FACTORS (Correct 1-100 calc)
     const SCALE = {
         master: 1, imdb: 10, tmdb: 1, trakt: 1, letterboxd: 20, roger_ebert: 25,
         metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
@@ -169,7 +169,7 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
     updateGlobalStyles();
 
     /* ==========================================================================
-       3. ENDS AT LOGIC (Strict)
+       3. ENDS AT LOGIC (Robust Search + Strict Order)
     ========================================================================== */
     function formatTime(minutes) {
         const d = new Date(Date.now() + minutes * 60000);
@@ -191,6 +191,7 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
     }
 
     function updateEndsAt() {
+        // Robust search for anchor (FSK or Runtime)
         let anchor = document.querySelector('.mediaInfoOfficialRating');
         if (!anchor) {
             const items = document.querySelectorAll('.itemMiscInfo, .mediaInfoItem');
@@ -201,9 +202,10 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
                 }
             }
         }
+        
         if (!anchor) return;
 
-        // Clean default
+        // Cleanup default text
         if (anchor.parentNode) {
             anchor.parentNode.querySelectorAll('*').forEach(el => {
                 if (el.id !== 'mdbl-custom-ends' && !el.classList.contains('mdblist-rating-container')) {
@@ -225,7 +227,7 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
             endsAtDiv.textContent = `Ends at ${formatTime(runtimeMinutes)}`;
             endsAtDiv.style.display = '';
 
-            // --- STRICT ORDER ENFORCEMENT: [Anchor] -> [EndsAt] -> [Ratings] ---
+            // STRICT ORDER: Anchor -> EndsAt -> Ratings
             if (anchor.nextSibling !== endsAtDiv) {
                 anchor.insertAdjacentElement('afterend', endsAtDiv);
             }
@@ -275,25 +277,29 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
     }
 
     function renderRatings(container, data, type) {
+        // CLEANUP
         container.innerHTML = '';
         
-        // Settings Button (RE-ATTACH listener to prevent "menu broken" bug)
+        // Re-add Button
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
+        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         btn.title = 'Settings';
-        btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
         container.appendChild(btn);
 
         let itemsHtml = '';
         const ids = { imdb: data.ids?.imdb||data.imdbid, tmdb: data.ids?.tmdb||data.id, trakt: data.ids?.trakt||data.traktid, mal: data.ids?.mal, anilist: data.ids?.anilist };
+        
         let masterSum = 0, masterCount = 0;
 
         const processRating = (key, rawVal, url, count, name) => {
             if (rawVal === null || rawVal === undefined) return;
             const val = parseFloat(rawVal);
             if (isNaN(val)) return;
+            
             const score = val * (SCALE[key] || 1);
+
             masterSum += score;
             masterCount++;
             itemsHtml += createRatingHtml(key, score, generateLink(key, ids, url, type, data.title), count, name);
@@ -320,7 +326,6 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
                 else if (s.includes('myanimelist')) processRating('myanimelist', v, u, c, 'MAL');
             });
 
-            // Master Rating
             let masterHtml = '';
             if (masterCount > 0 && CFG.sources.master) {
                 const avg = masterSum / masterCount;
@@ -331,10 +336,9 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
             const wrapper = document.createElement('span');
             wrapper.innerHTML = masterHtml + itemsHtml;
             container.appendChild(wrapper);
-            refreshDomElements();
             
-            // FORCE POSITION CHECK AGAIN
-            updateEndsAt();
+            refreshDomElements();
+            updateEndsAt(); // Force re-check of order
         } else {
              const err = document.createElement('span');
              err.className = 'mdbl-status-text';
@@ -419,13 +423,13 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
         container.className = 'mdblist-rating-container';
         container.dataset.id = id;
         
-        // Initial button placeholder
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
         btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         container.appendChild(btn);
 
+        // Initial insertion
         const endsAtDiv = document.getElementById('mdbl-custom-ends');
         if (endsAtDiv && endsAtDiv.previousElementSibling === target) {
             endsAtDiv.insertAdjacentElement('afterend', container);
@@ -440,7 +444,7 @@ console.log('[Jellyfin Ratings] Loading v11.10.0...');
     scanAndProcessLinks();
 
     /* ==========================================================================
-       6. SETTINGS MENU
+       6. SETTINGS MENU (Restored v11.8)
     ========================================================================== */
     function initMenu() {
         if(document.getElementById('mdbl-panel')) return;
