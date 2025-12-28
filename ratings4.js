@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.11.0 — Original Ends-At Logic)
+// @name          Jellyfin Ratings (v11.10.0 — Positioning Force Fix)
 // @namespace     https://mdblist.com
-// @version       11.11.0
-// @description   Restores the specific 'Ends At' placement logic from the original ratings.js to ensure correct order [Time] -> [Ratings].
+// @version       11.10.0
+// @description   Forces 'Ends At' before ratings on load, restores Menu clickability, keeps correct scaling and links.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.11.0...');
+console.log('[Jellyfin Ratings] Loading v11.10.0...');
 
 (function() {
     'use strict';
@@ -46,6 +46,7 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
         }
     };
 
+    // ORIGINAL SCALE FACTORS (Restored)
     const SCALE = {
         master: 1, imdb: 10, tmdb: 1, trakt: 1, letterboxd: 20, roger_ebert: 25,
         metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
@@ -134,7 +135,7 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
             .mdbl-settings-btn:hover { opacity: 1; }
             .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
             .mdbl-status-text { font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b; }
-            #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
+            #mdbl-custom-ends { display: inline-block; margin-left: 10px; opacity: 0.9; vertical-align: middle; font-size: inherit; }
             .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
         `;
         Object.keys(CFG.priorities).forEach(key => {
@@ -164,12 +165,11 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
             span.style.color = CFG.display.colorNumbers ? color : '';
             span.textContent = CFG.display.showPercentSymbol ? `${Math.round(score)}%` : `${Math.round(score)}`;
         });
-        updateEndsAt(); // Ensure position update
     }
     updateGlobalStyles();
 
     /* ==========================================================================
-       3. ENDS AT LOGIC (Original from ratings.js)
+       3. ENDS AT LOGIC (Strict)
     ========================================================================== */
     function formatTime(minutes) {
         const d = new Date(Date.now() + minutes * 60000);
@@ -179,87 +179,62 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
 
     function parseRuntimeToMinutes(text) {
         if (!text) return 0;
-        let m = text.match(/(?:(\d+)\s*(?:h|hr|std?)\w*\s*)?(?:(\d+)\s*(?:m|min)\w*)?/i);
-        if (m && (m[1] || m[2])) {
-            const h = parseInt(m[1] || '0', 10);
-            const min = parseInt(m[2] || '0', 10);
-            if (h > 0 || min > 0) return h * 60 + min;
-        }
-        m = text.match(/(\d+)\s*(?:m|min)\w*/i);
-        if (m) return parseInt(m[1], 10);
-        return 0;
+        let h = 0, m = 0;
+        const regexH = /(\d+)\s*(?:h|hr|std)/i;
+        const regexM = /(\d+)\s*(?:m|min)/i;
+        let matchH = text.match(regexH);
+        if (matchH) h = parseInt(matchH[1]);
+        let matchM = text.match(regexM);
+        if (matchM) m = parseInt(matchM[1]);
+        if (h === 0 && m === 0) { if (/^\d+\s*m$/i.test(text.trim())) m = parseInt(text); }
+        return h * 60 + m;
     }
 
     function updateEndsAt() {
-        const allWrappers = document.querySelectorAll('.itemMiscInfo');
-        let primary = null;
-        for (const el of allWrappers) {
-            if (el.offsetParent !== null) { primary = el; break; }
-        }
-
-        document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
-            el.style.display = 'none';
-            el.style.visibility = 'hidden';
-            el.style.width = '0px';
-        });
-
-        if (!primary) return;
-
-        let minutes = 0;
-        const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
-        if (detailContainer) {
-            const walker = document.createTreeWalker(detailContainer, NodeFilter.SHOW_TEXT, null, false);
-            let node;
-            while ((node = walker.nextNode())) {
-                const val = node.nodeValue.trim();
-                if (val.length > 0 && val.length < 20 && /\d/.test(val)) {
-                    const p = parseRuntimeToMinutes(val);
-                    if (p > 0) { minutes = p; break; }
+        let anchor = document.querySelector('.mediaInfoOfficialRating');
+        if (!anchor) {
+            const items = document.querySelectorAll('.itemMiscInfo, .mediaInfoItem');
+            for (const el of items) {
+                if (/^\d+\s*(?:h(?:ours?)?)?\s*\d*\s*m(?:inutes?)?$/i.test(el.innerText.trim())) {
+                    anchor = el;
+                    break;
                 }
             }
         }
+        if (!anchor) return;
 
-        const parent = primary.parentNode;
-        if (parent) {
-            parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
-                if (el.id === 'customEndsAt') return;
-                if (el.classList.contains('mdblist-rating-container') || el.closest('.mdblist-rating-container')) return;
-                if (el.classList.contains('mediaInfoOfficialRating')) return;
-                const t = (el.textContent || '').toLowerCase();
-                if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
-                     el.style.display = 'none';
+        // Clean default
+        if (anchor.parentNode) {
+            anchor.parentNode.querySelectorAll('*').forEach(el => {
+                if (el.id !== 'mdbl-custom-ends' && !el.classList.contains('mdblist-rating-container')) {
+                    const t = (el.innerText || '').toLowerCase();
+                    if (t.includes('ends at') || t.includes('endet um')) el.style.display = 'none';
                 }
             });
         }
 
-        let span = document.getElementById('customEndsAt');
-        const officialRating = document.querySelector('.mediaInfoOfficialRating');
-
-        if (minutes > 0) {
-            const timeStr = formatTime(minutes);
-            if (!span) {
-                span = document.createElement('div');
-                span.id = 'customEndsAt';
+        let runtimeMinutes = parseRuntimeToMinutes(anchor.textContent) || (anchor.parentNode ? parseRuntimeToMinutes(anchor.parentNode.textContent) : 0);
+        let endsAtDiv = document.getElementById('mdbl-custom-ends');
+        
+        if (runtimeMinutes > 0) {
+            if (!endsAtDiv) {
+                endsAtDiv = document.createElement('div');
+                endsAtDiv.id = 'mdbl-custom-ends';
+                anchor.insertAdjacentElement('afterend', endsAtDiv);
             }
-            span.textContent = `Ends at ${timeStr}`;
-            span.style.display = '';
+            endsAtDiv.textContent = `Ends at ${formatTime(runtimeMinutes)}`;
+            endsAtDiv.style.display = '';
 
-            // Strict placement BEFORE ratings logic
-            if (officialRating && officialRating.parentNode) {
-                officialRating.insertAdjacentElement('afterend', span);
-            } else {
-                 if(!primary.contains(span)) primary.appendChild(span);
+            // --- STRICT ORDER ENFORCEMENT: [Anchor] -> [EndsAt] -> [Ratings] ---
+            if (anchor.nextSibling !== endsAtDiv) {
+                anchor.insertAdjacentElement('afterend', endsAtDiv);
+            }
+            const rc = document.querySelector('.mdblist-rating-container');
+            if (rc && endsAtDiv.nextSibling !== rc) {
+                endsAtDiv.insertAdjacentElement('afterend', rc);
             }
         } else {
-            if(span) span.style.display = 'none';
-        }
-
-        // --- KEY LOGIC FROM ORIGINAL: FORCE RATINGS AFTER ENDS AT ---
-        const rc = document.querySelector('.mdblist-rating-container');
-        if (rc && span && span.parentNode) {
-            span.insertAdjacentElement('afterend', rc);
-        } else if (rc && officialRating) {
-            officialRating.insertAdjacentElement('afterend', rc);
+            if (endsAtDiv) endsAtDiv.style.display = 'none';
         }
     }
 
@@ -302,11 +277,12 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
     function renderRatings(container, data, type) {
         container.innerHTML = '';
         
+        // Settings Button (RE-ATTACH listener to prevent "menu broken" bug)
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
-        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         btn.title = 'Settings';
+        btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); });
         container.appendChild(btn);
 
         let itemsHtml = '';
@@ -344,6 +320,7 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
                 else if (s.includes('myanimelist')) processRating('myanimelist', v, u, c, 'MAL');
             });
 
+            // Master Rating
             let masterHtml = '';
             if (masterCount > 0 && CFG.sources.master) {
                 const avg = masterSum / masterCount;
@@ -355,7 +332,9 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
             wrapper.innerHTML = masterHtml + itemsHtml;
             container.appendChild(wrapper);
             refreshDomElements();
-            updateEndsAt(); // Ensure order after render
+            
+            // FORCE POSITION CHECK AGAIN
+            updateEndsAt();
         } else {
              const err = document.createElement('span');
              err.className = 'mdbl-status-text';
@@ -391,8 +370,9 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
        5. ENGINE
     ========================================================================== */
     function scanAndProcessLinks() {
-        updateEndsAt(); // Regular check
-        
+        updateEndsAt();
+        document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
+
         document.querySelectorAll('a[href*="themoviedb.org/"]').forEach(link => {
             if (link.dataset.mdblProcessed) return;
             link.dataset.mdblProcessed = "true";
@@ -427,13 +407,8 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
     }
 
     function insertContainer(target, type, id, apiSource) {
-        // Just insert the container; let updateEndsAt handle the re-ordering
         let next = target.nextElementSibling;
-        
-        // Skip over the Ends At div if present
-        if (next && next.id === 'customEndsAt') {
-            next = next.nextElementSibling;
-        }
+        if (next && next.id === 'mdbl-custom-ends') next = next.nextElementSibling;
 
         if (next && next.classList.contains('mdblist-rating-container')) {
             if (next.dataset.id === id) return;
@@ -444,14 +419,14 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
         container.className = 'mdblist-rating-container';
         container.dataset.id = id;
         
+        // Initial button placeholder
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
         btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         container.appendChild(btn);
 
-        // Initial naive insertion (updateEndsAt will fix it)
-        const endsAtDiv = document.getElementById('customEndsAt');
+        const endsAtDiv = document.getElementById('mdbl-custom-ends');
         if (endsAtDiv && endsAtDiv.previousElementSibling === target) {
             endsAtDiv.insertAdjacentElement('afterend', container);
         } else {
@@ -554,7 +529,7 @@ console.log('[Jellyfin Ratings] Loading v11.11.0...');
         let html = `
         <header><h3>Settings</h3><button id="mdbl-close">✕</button></header>
         <div class="mdbl-section">${(!INJ_KEYS.MDBLIST && !k) ? `<div id="mdbl-key-box" class="mdbl-source"><input type="text" id="mdbl-key-mdb" placeholder="MDBList API key" value="${k}"></div>`:''}</div>
-        <div class="mdbl-section"><div class="mdbl-subtle">Sources (drag to reorder)</div><div id="mdbl-sources"></div><hr></div>
+        <div class="mdbl-section"><div class="mdbl-subtle">Sources (drag)</div><div id="mdbl-sources"></div><hr></div>
         <div class="mdbl-section">
             <div class="mdbl-subtle">Display</div>
             ${row('Color numbers', `<input type="checkbox" id="d_cnum" ${CFG.display.colorNumbers?'checked':''}>`)}
