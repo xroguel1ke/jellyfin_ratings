@@ -1,18 +1,18 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.16.0 — Strict Merge)
+// @name          Jellyfin Ratings (v11.16.1 — Fixed Save & Drag)
 // @namespace     https://mdblist.com
-// @version       11.16.0
-// @description   Merges reliable scanning (other-user), original Ends-At logic (ratings.js), and fixes menu/saving issues.
+// @version       11.16.1
+// @description   Fixes the crash on save, enables live preview for drag-and-drop, and adds a visual save notification without reloading.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.16.0...');
+console.log('[Jellyfin Ratings] Loading v11.16.1...');
 
 (function() {
     'use strict';
 
     /* ==========================================================================
-       1. CONFIGURATION (From ratings.js)
+       1. CONFIGURATION
     ========================================================================== */
     const NS = 'mdbl_';
     const API_BASE = 'https://api.mdblist.com';
@@ -46,7 +46,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         }
     };
 
-    // ORIGINAL SCALE FACTORS (From ratings.js)
     const SCALE = {
         master: 1, imdb: 10, tmdb: 1, trakt: 1, letterboxd: 20, roger_ebert: 25,
         metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
@@ -137,6 +136,9 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             .mdbl-status-text { font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b; }
             #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
             .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
+            /* Toast */
+            .mdbl-toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: rgba(30, 30, 30, 0.9); color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); z-index: 100001; opacity: 0; transition: opacity 0.3s ease; pointer-events: none; }
+            .mdbl-toast.show { opacity: 1; }
         `;
         Object.keys(CFG.priorities).forEach(key => {
             const isEnabled = CFG.sources[key];
@@ -165,12 +167,25 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             span.style.color = CFG.display.colorNumbers ? color : '';
             span.textContent = CFG.display.showPercentSymbol ? `${Math.round(score)}%` : `${Math.round(score)}`;
         });
-        updateEndsAt(); // Polling ensures this updates on navigation
+        updateEndsAt();
     }
     updateGlobalStyles();
 
+    function showToast(msg) {
+        let t = document.getElementById('mdbl-toast-el');
+        if (!t) {
+            t = document.createElement('div');
+            t.id = 'mdbl-toast-el';
+            t.className = 'mdbl-toast';
+            document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
     /* ==========================================================================
-       3. ENDS AT LOGIC (Original from ratings.js)
+       3. ENDS AT LOGIC
     ========================================================================== */
     function formatTime(minutes) {
         const d = new Date(Date.now() + minutes * 60000);
@@ -192,14 +207,12 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
     }
 
     function updateEndsAt() {
-        // Only run if we found a primary detail container
         const allWrappers = document.querySelectorAll('.itemMiscInfo');
         let primary = null;
         for (const el of allWrappers) {
             if (el.offsetParent !== null) { primary = el; break; }
         }
 
-        // Hide defaults
         document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
             el.style.display = 'none';
             el.style.visibility = 'hidden';
@@ -208,7 +221,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
 
         if (!primary) return;
 
-        // Calculate Minutes
         let minutes = 0;
         const detailContainer = primary.closest('.detailRibbon') || primary.closest('.mainDetailButtons') || primary.parentNode;
         if (detailContainer) {
@@ -223,7 +235,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             }
         }
 
-        // Hide Existing "Ends At" text
         const parent = primary.parentNode;
         if (parent) {
             parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -232,12 +243,11 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
                 if (el.classList.contains('mediaInfoOfficialRating')) return;
                 const t = (el.textContent || '').toLowerCase();
                 if (t.includes('ends at') || t.includes('endet um') || t.includes('endet am')) {
-                     el.style.display = 'none';
+                      el.style.display = 'none';
                 }
             });
         }
 
-        // Create/Update Element
         let span = document.getElementById('customEndsAt');
         const officialRating = document.querySelector('.mediaInfoOfficialRating');
 
@@ -250,7 +260,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             span.textContent = `Ends at ${timeStr}`;
             span.style.display = '';
 
-            // Position Logic: After Official Rating or inside Primary
             if (officialRating && officialRating.parentNode) {
                 officialRating.insertAdjacentElement('afterend', span);
             } else {
@@ -260,7 +269,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             if(span) span.style.display = 'none';
         }
 
-        // Enforce Order: EndsAt -> Ratings
         const rc = document.querySelector('.mdblist-rating-container');
         if (rc && span && span.parentNode) {
             span.insertAdjacentElement('afterend', rc);
@@ -286,7 +294,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             case 'metacritic_critic':
             case 'metacritic_user': return `https://www.metacritic.com/${safeType}/${localSlug(title)}`;
             case 'rotten_tomatoes_critic':
-            case 'rotten_tomatoes_audience': 
+            case 'rotten_tomatoes_audience':
                 if (sLink.startsWith('/')) return `https://www.rottentomatoes.com${sLink}`;
                 return sLink.length > 2 ? `https://www.rottentomatoes.com/m/${sLink}` : '#';
             case 'anilist': return ids.anilist ? `https://anilist.co/anime/${ids.anilist}` : `https://anilist.co/search/anime?search=${safeTitle}`;
@@ -307,7 +315,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
 
     function renderRatings(container, data, type) {
         container.innerHTML = '';
-        
+
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
@@ -316,14 +324,14 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
 
         let itemsHtml = '';
         const ids = { imdb: data.ids?.imdb||data.imdbid, tmdb: data.ids?.tmdb||data.id, trakt: data.ids?.trakt||data.traktid, mal: data.ids?.mal, anilist: data.ids?.anilist };
-        
+
         let masterSum = 0, masterCount = 0;
 
         const processRating = (key, rawVal, url, count, name) => {
             if (rawVal === null || rawVal === undefined) return;
             const val = parseFloat(rawVal);
             if (isNaN(val)) return;
-            
+
             const score = val * (SCALE[key] || 1);
 
             masterSum += score;
@@ -362,7 +370,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             const wrapper = document.createElement('span');
             wrapper.innerHTML = masterHtml + itemsHtml;
             container.appendChild(wrapper);
-            
+
             refreshDomElements();
         } else {
              const err = document.createElement('span');
@@ -377,7 +385,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         let url;
         if (apiSource === 'imdb') url = `${API_BASE}/imdb/${id}?apikey=${API_KEY}`;
         else url = `${API_BASE}/tmdb/${type}/${id}?apikey=${API_KEY}`;
-        
+
         const cacheKey = `${NS}c_${id}`;
         try {
             const cached = localStorage.getItem(cacheKey);
@@ -386,7 +394,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
                 if (Date.now() - c.ts < CACHE_DURATION) { renderRatings(container, c.data, type); return; }
             }
         } catch(e) {}
-        
+
         const st = document.createElement('span'); st.className = 'mdbl-status-text'; st.textContent = '...'; container.appendChild(st);
         fetch(url).then(r=>r.json()).then(d => {
             st.remove();
@@ -399,7 +407,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
        5. ENGINE (Loop)
     ========================================================================== */
     function scanAndProcessLinks() {
-        // ALWAYS run Ends At update inside the loop to catch page transitions
         updateEndsAt();
 
         document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating').forEach(el => el.style.display = 'none');
@@ -407,10 +414,10 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         document.querySelectorAll('a[href*="themoviedb.org/"]').forEach(link => {
             if (link.dataset.mdblProcessed) return;
             link.dataset.mdblProcessed = "true";
-            
+
             const m = link.href.match(/themoviedb\.org\/(movie|tv)\/(\d+)/);
             if (!m) return;
-            
+
             let type = m[1] === 'tv' ? 'show' : 'movie';
             let id = m[2];
             let apiSource = 'tmdb';
@@ -438,10 +445,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
     }
 
     function insertContainer(target, type, id, apiSource) {
-        // The container insertion uses updateEndsAt() logic slightly by relying on customEndsAt existence
         let next = target.nextElementSibling;
-        
-        // Skip over the Ends At div if present
         if (next && next.id === 'customEndsAt') {
             next = next.nextElementSibling;
         }
@@ -454,14 +458,13 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         const container = document.createElement('div');
         container.className = 'mdblist-rating-container';
         container.dataset.id = id;
-        
+
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
         btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         container.appendChild(btn);
 
-        // Insertion Logic matches original behavior + Ends At handling
         const endsAtDiv = document.getElementById('customEndsAt');
         if (endsAtDiv && endsAtDiv.previousElementSibling === target) {
             endsAtDiv.insertAdjacentElement('afterend', container);
@@ -476,7 +479,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
     scanAndProcessLinks();
 
     /* ==========================================================================
-       6. SETTINGS MENU (Working Drag + Reload)
+       6. SETTINGS MENU
     ========================================================================== */
     function initMenu() {
         if(document.getElementById('mdbl-panel')) return;
@@ -514,15 +517,15 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         #mdbl-panel .mdbl-actions { display:flex; align-items:center; gap:8px; }
         #mdbl-panel .mdbl-actions .mdbl-grow { flex:1; }
         @media (max-width: 600px) { #mdbl-panel { width: 96% !important; left: 2% !important; right: 2% !important; bottom: 10px !important; top: auto !important; transform: none !important; max-height: 80vh; --mdbl-right-col: 40px; } }`;
-        
+
         const style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
         const panel = document.createElement('div'); panel.id = 'mdbl-panel'; document.body.appendChild(panel);
-        
+
         let isDrag = false, sx, sy, lx, ly;
         panel.addEventListener('mousedown', (e) => {
             if (!e.target.closest('header')) return;
-            if (window.innerWidth<=600||['BUTTON'].includes(e.target.tagName))return; 
-            isDrag=true; const r=panel.getBoundingClientRect(); lx=r.left; ly=r.top; sx=e.clientX; sy=e.clientY; panel.style.right='auto'; panel.style.bottom='auto'; panel.style.left=lx+'px'; panel.style.top=ly+'px'; 
+            if (window.innerWidth<=600||['BUTTON'].includes(e.target.tagName))return;
+            isDrag=true; const r=panel.getBoundingClientRect(); lx=r.left; ly=r.top; sx=e.clientX; sy=e.clientY; panel.style.right='auto'; panel.style.bottom='auto'; panel.style.left=lx+'px'; panel.style.top=ly+'px';
         });
         document.addEventListener('mousemove', (e) => { if(!isDrag)return; panel.style.left=(lx+(e.clientX-sx))+'px'; panel.style.top=(ly+(e.clientY-sy))+'px'; });
         document.addEventListener('mouseup', ()=>isDrag=false);
@@ -545,10 +548,14 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
         const p = document.getElementById('mdbl-panel');
         if (p) p.style.display = 'none';
         if (save) {
+            const keyInput = p.querySelector('#mdbl-key-mdb');
+            if(keyInput && keyInput.value.trim()) {
+                localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: keyInput.value.trim()}));
+            }
             saveConfig();
-            if(p.querySelector('#mdbl-key-mdb').value.trim()) localStorage.setItem('mdbl_keys', JSON.stringify({MDBLIST: p.querySelector('#mdbl-key-mdb').value.trim()}));
-            // FORCE RELOAD
-            window.location.reload();
+            updateGlobalStyles();
+            refreshDomElements();
+            showToast('Settings Saved');
         } else if (CFG_BACKUP) {
             CFG = JSON.parse(JSON.stringify(CFG_BACKUP));
             refreshDomElements();
@@ -580,12 +587,12 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
             </div>
         </div>
         <div class="mdbl-actions" style="padding-bottom:16px"><button id="mdbl-btn-reset">Reset</button><button id="mdbl-btn-save" class="primary">Save & Apply</button></div>`;
-        
+
         panel.innerHTML = html;
         panel.querySelector('#mdbl-close').onclick = () => closeSettingsMenu(false);
         panel.querySelector('#mdbl-btn-save').onclick = () => { closeSettingsMenu(true); };
         panel.querySelector('#mdbl-btn-reset').onclick = () => { if(confirm('Reset?')) { localStorage.removeItem('mdbl_prefs'); location.reload(); }};
-        
+
         const update = () => {
             CFG.display.colorNumbers = panel.querySelector('#d_cnum').checked;
             CFG.display.showPercentSymbol = panel.querySelector('#d_pct').checked;
@@ -608,10 +615,10 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
              div.draggable = true;
              div.dataset.key = k;
              div.innerHTML = `<div class="mdbl-src-left"><span class="mdbl-drag-handle">::</span><img src="${LOGO[k]}" style="height:16px"><span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span></div><input type="checkbox" ${CFG.sources[k]?'checked':''}>`;
-             
-             div.onmousedown = (e) => e.stopPropagation(); 
+
+             div.onmousedown = (e) => e.stopPropagation();
              div.querySelector('input').onchange = (e) => { CFG.sources[k] = e.target.checked; updateGlobalStyles(); };
-             
+
              div.addEventListener('dragstart', (e) => { dragSrc = div; e.dataTransfer.effectAllowed = 'move'; });
              div.addEventListener('dragover', (e) => {
                  e.preventDefault();
@@ -620,7 +627,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.0...');
                      const srcI = all.indexOf(dragSrc), tgtI = all.indexOf(div);
                      list.insertBefore(dragSrc, srcI < tgtI ? div.nextSibling : div);
                      [...list.querySelectorAll('.mdbl-src-row')].forEach((r, i) => CFG.priorities[r.dataset.key] = i+1);
-                     updateGlobalStyles(); 
+                     updateGlobalStyles();
                  }
              });
              sList.appendChild(div);
