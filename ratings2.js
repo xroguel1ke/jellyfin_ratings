@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v10.4.0 — Episode Support)
+// @name          Jellyfin Ratings (v10.5.0 — Fix & Episode Toggle)
 // @namespace     https://mdblist.com
-// @version       10.4.0
-// @description   Displays ratings from multiple sources with a settings panel. Includes Episode/Series toggle.
+// @version       10.5.0
+// @description   Displays ratings from multiple sources with a settings panel. Fixes API errors and includes Series/Episode toggle.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v10.4.0...');
+console.log('[Jellyfin Ratings] Loading v10.5.0...');
 
 /* ==========================================================================
    1. CONFIGURATION & CONSTANTS
@@ -34,7 +34,7 @@ const DEFAULTS = {
         colorBands: { redMax: 50, orangeMax: 69, ygMax: 79 },
         colorChoice: { red: 0, orange: 2, yg: 3, mg: 0 },
         endsAt24h: true,
-        episodeStrategy: 'series' // 'series' or 'episode'
+        episodeStrategy: 'series' // 'series' (default) or 'episode'
     },
     spacing: { ratingsTopGapPx: 0 },
     priorities: {
@@ -87,7 +87,6 @@ const GEAR_SVG = `<svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0
 // State
 let CFG = loadConfig();
 let CFG_BACKUP = null;
-let currentImdbId = null;
 
 /* ==========================================================================
    2. HELPERS & STATE MANAGEMENT
@@ -98,7 +97,6 @@ function loadConfig() {
         const raw = localStorage.getItem(`${NS}prefs`);
         if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
         const p = JSON.parse(raw);
-        // Deep merge
         return {
             sources: { ...DEFAULTS.sources, ...p.sources },
             display: {
@@ -146,7 +144,7 @@ function updateGlobalStyles() {
         .mdbl-status-text { font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b; white-space: nowrap; font-family: monospace; font-weight: bold; }
         .itemMiscInfo, .mainDetailRibbon, .detailRibbon { overflow: visible !important; contain: none !important; position: relative; z-index: 10; }
         #customEndsAt { font-size: inherit; opacity: 0.9; cursor: default; margin-left: 10px; display: inline-block; padding: 2px 4px; vertical-align: middle; }
-        .mediaInfoOfficialRating { display: inline-flex !important; vertical-align: middle; }
+        /* Hide original ratings to prevent clutter */
         .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; opacity: 0 !important; visibility: hidden !important; width: 0 !important; height: 0 !important; overflow: hidden !important; }
     `;
 
@@ -221,10 +219,10 @@ function updateEndsAt() {
         if (el.offsetParent !== null) { primary = el; break; }
     }
 
+    // Hide default ratings
     document.querySelectorAll('.starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating').forEach(el => {
         el.style.display = 'none';
         el.style.visibility = 'hidden';
-        el.style.width = '0px';
     });
 
     if (!primary) return;
@@ -243,6 +241,7 @@ function updateEndsAt() {
         }
     }
 
+    // Hide original "Ends at" text if present
     const parent = primary.parentNode;
     if (parent) {
         parent.querySelectorAll('.itemMiscInfo-secondary, .itemMiscInfo span, .itemMiscInfo div').forEach(el => {
@@ -372,7 +371,7 @@ function updateStatus(container, text, color = '#ffeb3b') {
     if(st) { st.textContent = text; st.style.color = color; }
 }
 
-function renderRatings(container, data, pageImdbId, type) {
+function renderRatings(container, data, type) {
     const btn = container.querySelector('.mdbl-settings-btn');
     container.innerHTML = '';
     if(btn) {
@@ -382,7 +381,7 @@ function renderRatings(container, data, pageImdbId, type) {
 
     let html = '';
     const ids = {
-        imdb: data.ids?.imdb || data.imdbid || pageImdbId,
+        imdb: data.ids?.imdb || data.imdbid,
         tmdb: data.ids?.tmdb || data.id || data.tmdbid || data.tmdb_id,
         trakt: data.ids?.trakt || data.traktid || data.trakt_id,
         slug: data.ids?.slug || data.slug,
@@ -456,7 +455,7 @@ function fetchRatings(container, id, type, apiMode) {
         if (cached) {
             const c = JSON.parse(cached);
             if (Date.now() - c.ts < CACHE_DURATION) { 
-                renderRatings(container, c.data, currentImdbId, type); 
+                renderRatings(container, c.data, type); 
                 return; 
             }
         }
@@ -473,7 +472,7 @@ function fetchRatings(container, id, type, apiMode) {
         .then(d => {
             container.dataset.fetching = 'false';
             localStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: d }));
-            renderRatings(container, d, currentImdbId, type);
+            renderRatings(container, d, type);
         })
         .catch(e => {
             container.dataset.fetching = 'false';
@@ -482,12 +481,14 @@ function fetchRatings(container, id, type, apiMode) {
         });
 }
 
-// === SCANNER ===
+// === ROBUST SCANNER (Based on ratings-other-user.js) ===
 function scan() {
     updateEndsAt();
 
-    // Scan for TMDB links (robust method from other user script)
-    // Matches patterns like /tv/123, /movie/456, /tv/123/season/1...
+    // 1. Scan for TMDB links (most reliable source in Jellyfin)
+    // Matches patterns like /tv/123, /movie/456
+    // IMPORTANT: regex matches the START of the path, effectively stripping /season/.. etc
+    // This replicates the stability of ratings-other-user.js
     const tmdbLinks = document.querySelectorAll('a[href*="themoviedb.org/"]:not([data-mdbl-processed])');
     
     tmdbLinks.forEach(link => {
@@ -495,22 +496,23 @@ function scan() {
         const m = link.href.match(/\/themoviedb\.org\/(movie|tv)\/(\d+)/);
         
         if (m) {
-            const rawType = m[1];
-            const rawId = m[2];
+            const rawType = m[1]; // 'tv' or 'movie'
+            const rawId = m[2];   // numeric ID
             
-            // Check if it is an episode page link
+            // Determine if it is likely an episode page
             const isEpisodeLink = link.href.includes('/season/') || link.href.includes('/episode/');
             
             if (rawType === 'tv' && isEpisodeLink) {
-                // IT IS AN EPISODE
+                // === EPISODE LOGIC ===
                 if (CFG.display.episodeStrategy === 'episode') {
-                    // STRATEGY: INDIVIDUAL EPISODE
-                    // Try to find a sibling IMDb link for the specific episode
-                    const parent = link.closest('.itemMiscInfo') || link.parentNode.parentNode; // adjust based on DOM
+                    // Strategy: Specific Episode Rating
+                    // Try to find a sibling IMDb link for the specific episode (Jellyfin usually provides one)
+                    // We look in the surrounding container.
+                    const parent = link.closest('.itemMiscInfo') || link.closest('.mainDetailButtons') || link.parentNode.parentNode;
                     let imdbEpisodeId = null;
                     
-                    // Look around for IMDb link in the same container area
                     if (parent) {
+                        // Find any link to imdb /title/tt...
                         const imdbLink = parent.querySelector('a[href*="imdb.com/title/tt"]');
                         if (imdbLink) {
                             const im = imdbLink.href.match(/tt\d+/);
@@ -518,70 +520,65 @@ function scan() {
                         }
                     }
                     
-                    // If we found an IMDb ID for the episode, use it (MDBList handles episodes via IMDb ID well)
                     if (imdbEpisodeId) {
-                        injectContainer(imdbEpisodeId, 'movie', 'imdb'); // treat as movie/generic item via IMDb
+                        // Fetch specific episode using IMDb ID (treated as 'movie' type in MDBList usually)
+                        injectContainer(imdbEpisodeId, 'movie', 'imdb'); 
                     } else {
-                        // Fallback: Show Series rating if individual not found?
-                        // Or just show nothing/error. Let's fallback to Series so user sees something.
-                        // Or, strict adherence: user asked for toggle. 
-                        // We will try the Series ID but it won't be the episode rating.
-                        // Better: Pass the series ID but update status?
+                        // Fallback to Series rating if specific IMDb ID not found
                         injectContainer(rawId, 'show', 'tmdb');
                     }
                 } else {
-                    // STRATEGY: SERIES RATING (DEFAULT)
-                    // Robustly uses the extracted Series ID (rawId), ignoring the season/episode part of URL
+                    // Strategy: Series Rating (Default/Robust)
+                    // Just use the Show ID we extracted
                     injectContainer(rawId, 'show', 'tmdb');
                 }
             } else {
-                // MOVIE OR SHOW (MAIN PAGE)
-                injectContainer(rawId, rawType === 'tv' ? 'show' : 'movie', 'tmdb');
+                // === MOVIE OR SHOW MAIN PAGE ===
+                const type = rawType === 'tv' ? 'show' : 'movie';
+                injectContainer(rawId, type, 'tmdb');
             }
         }
     });
 
-    // Scan for IMDb links directly (fallback if TMDB link missing or logic prefers it)
+    // 2. Scan for IMDb links (Fallback)
     const imdbLinks = document.querySelectorAll('a[href*="imdb.com/title/"]:not([data-mdbl-processed])');
     imdbLinks.forEach(link => {
         link.dataset.mdblProcessed = "true";
         const m = link.href.match(/tt\d+/);
         if (m) {
-            // Check if already injected via TMDB logic to avoid dupe
-            // We assume 'movie' type for generic IMDb fetch unless we know better
+            // Only inject if not already done by TMDB logic
             injectContainer(m[0], 'movie', 'imdb');
         }
     });
 }
 
 function injectContainer(id, type, apiMode) {
-    // Find valid insertion point
+    // Robust insertion logic (inspired by ratings-other-user.js)
+    // 1. Try official rating container
     let target = document.querySelector('.mediaInfoOfficialRating');
     let parent = (target && target.offsetParent !== null) ? target.parentNode : null;
 
     if (!parent) {
-        // Fallback logic for when official rating is missing (common on episodes)
-        const allWrappers = document.querySelectorAll('.itemMiscInfo');
+        // 2. Try looking for runtime text (e.g. "45 min") - extremely common on episode pages
+        const allWrappers = document.querySelectorAll('.itemMiscInfo, .mediaInfoItem');
         for (const el of allWrappers) {
-             // Look for runtime text (e.g., "45 min") to identify metadata row
-             if (el.innerText && /\d/.test(el.innerText)) {
-                 if (el.offsetParent !== null) { parent = el; break; }
+             if (el.innerText && /^\d+\s*(?:h(?:ours?)?)?\s*\d*\s*m(?:inutes?)?$/i.test(el.innerText.trim())) {
+                 if (el.offsetParent !== null) { parent = el.parentNode; target = el; break; }
              }
         }
     }
     
     if (!parent) {
-        // Last resort: check standard MediaInfo buttons container
+        // 3. Fallback to main button container
         parent = document.querySelector('.mainDetailButtons');
     }
     
     if (!parent) return;
 
-    // Check existing
+    // Remove duplicates
     const existing = parent.querySelector('.mdblist-rating-container');
     if (existing) {
         if (existing.dataset.tmdbId === id) return;
-        // Priority: If existing is TMDB and we have IMDb, stick with TMDB unless specified
         existing.remove();
     }
 
@@ -590,7 +587,7 @@ function injectContainer(id, type, apiMode) {
     container.dataset.tmdbId = id;
     container.dataset.source = apiMode;
 
-    // Insert logic
+    // Placement
     const endsAt = document.getElementById('customEndsAt');
     if (endsAt && endsAt.parentNode === parent) {
         endsAt.insertAdjacentElement('afterend', container);
