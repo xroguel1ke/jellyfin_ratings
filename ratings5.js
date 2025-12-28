@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.5.0 — Original Math Restore)
+// @name          Jellyfin Ratings (v11.6.0 — Menu & Layout Fix)
 // @namespace     https://mdblist.com
-// @version       11.5.0
-// @description   Restores exact scaling logic from original ratings.js, fixes double timestamps and menu dragging.
+// @version       11.6.0
+// @description   Fixes settings menu not opening (event listener bug) and ensures 'Ends At' time always appears BEFORE ratings.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.5.0...');
+console.log('[Jellyfin Ratings] Loading v11.6.0...');
 
 (function() {
     'use strict';
@@ -46,20 +46,11 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
         }
     };
 
-    // SCALE Factors directly from your ratings.js
+    // SCALE Factors (Keep functioning logic from v11.5.0)
     const SCALE = {
-        master: 1, 
-        imdb: 10, 
-        tmdb: 1, 
-        trakt: 1, 
-        letterboxd: 20, 
-        roger_ebert: 25,
-        metacritic_critic: 1, 
-        metacritic_user: 10, 
-        myanimelist: 10, 
-        anilist: 1,
-        rotten_tomatoes_critic: 1, 
-        rotten_tomatoes_audience: 1
+        master: 1, imdb: 10, tmdb: 1, trakt: 1, letterboxd: 20, roger_ebert: 25,
+        metacritic_critic: 1, metacritic_user: 10, myanimelist: 10, anilist: 1,
+        rotten_tomatoes_critic: 1, rotten_tomatoes_audience: 1
     };
 
     const SWATCHES = {
@@ -178,7 +169,7 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
     updateGlobalStyles();
 
     /* ==========================================================================
-       3. ENDS AT LOGIC (Strict De-duplication)
+       3. ENDS AT LOGIC (Strict De-duplication & Ordering)
     ========================================================================== */
     function formatTime(minutes) {
         const d = new Date(Date.now() + minutes * 60000);
@@ -235,19 +226,24 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
             if (!endsAtDiv) {
                 endsAtDiv = document.createElement('div');
                 endsAtDiv.id = 'mdbl-custom-ends';
+                // Insert initially after anchor
                 anchor.insertAdjacentElement('afterend', endsAtDiv);
             }
-            // Ensure position: Anchor -> EndsAt
-            if (anchor.nextSibling !== endsAtDiv) anchor.insertAdjacentElement('afterend', endsAtDiv);
             
-            endsAtDiv.textContent = `Ends at ${formatTime(runtimeMinutes)}`;
-            endsAtDiv.style.display = '';
+            // ORDER ENFORCEMENT: [Anchor] -> [EndsAt] -> [Ratings]
+            // 1. Ensure EndsAt is after Anchor
+            if (anchor.nextSibling !== endsAtDiv) {
+                anchor.insertAdjacentElement('afterend', endsAtDiv);
+            }
             
-            // Ensure Ratings are AFTER EndsAt
+            // 2. Ensure Ratings Container is after EndsAt
             const rc = document.querySelector('.mdblist-rating-container');
             if (rc && endsAtDiv.nextSibling !== rc) {
                 endsAtDiv.insertAdjacentElement('afterend', rc);
             }
+            
+            endsAtDiv.textContent = `Ends at ${formatTime(runtimeMinutes)}`;
+            endsAtDiv.style.display = '';
         } else {
             if (endsAtDiv) endsAtDiv.style.display = 'none';
         }
@@ -288,12 +284,16 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
     }
 
     function renderRatings(container, data, type) {
-        const btn = container.querySelector('.mdbl-settings-btn');
+        // MENU FIX: Clean container but ensure Settings Button is re-created cleanly
         container.innerHTML = '';
-        if(btn) { 
-            container.appendChild(btn); 
-            btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); }; 
-        }
+        
+        // 1. Create and append Settings Button (Fixes Menu not opening)
+        const btn = document.createElement('div');
+        btn.className = 'mdbl-rating-item mdbl-settings-btn';
+        btn.innerHTML = GEAR_SVG;
+        btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
+        btn.title = 'Settings';
+        container.appendChild(btn);
 
         let itemsHtml = '';
         const ids = { imdb: data.ids?.imdb||data.imdbid, tmdb: data.ids?.tmdb||data.id, trakt: data.ids?.trakt||data.traktid, mal: data.ids?.mal, anilist: data.ids?.anilist };
@@ -302,9 +302,10 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
 
         const processRating = (key, rawVal, url, count, name) => {
             if (rawVal === null || rawVal === undefined) return;
-            // Original ratings.js Math:
             const val = parseFloat(rawVal);
             if (isNaN(val)) return;
+            
+            // Standard Scaling Logic
             const score = val * (SCALE[key] || 1);
 
             masterSum += score;
@@ -342,10 +343,18 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
                 masterHtml = createRatingHtml('master', avg, wikiUrl, masterCount, 'Master Rating');
             }
 
-            container.innerHTML += masterHtml + itemsHtml;
+            // Append ratings via Span to avoid nuke
+            const wrapper = document.createElement('span');
+            wrapper.innerHTML = masterHtml + itemsHtml;
+            container.appendChild(wrapper);
+            
             refreshDomElements();
         } else {
-             container.innerHTML += `<span class="mdbl-status-text" style="color:#e53935">MDB: 0</span>`;
+             const err = document.createElement('span');
+             err.className = 'mdbl-status-text';
+             err.textContent = 'MDB: 0';
+             err.style.color = '#e53935';
+             container.appendChild(err);
         }
     }
 
@@ -413,8 +422,6 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
     }
 
     function insertContainer(target, type, id, apiSource) {
-        // Ends At is handled by updateEndsAt(). We just need to insert our container cleanly.
-        
         let next = target.nextElementSibling;
         
         // Skip over the Ends At div if it exists to check for ratings container
@@ -431,13 +438,14 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
         container.className = 'mdblist-rating-container';
         container.dataset.id = id;
         
+        // Initial Button (placeholder)
         const btn = document.createElement('div');
         btn.className = 'mdbl-rating-item mdbl-settings-btn';
         btn.innerHTML = GEAR_SVG;
         btn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSettingsMenu(); };
         container.appendChild(btn);
 
-        // Find the right place to insert
+        // Find the right place to insert based on Ends At presence
         const endsAtDiv = document.getElementById('mdbl-custom-ends');
         if (endsAtDiv && endsAtDiv.previousElementSibling === target) {
             // [Target] [EndsAt] -> [Container]
@@ -582,7 +590,7 @@ console.log('[Jellyfin Ratings] Loading v11.5.0...');
              div.dataset.key = k;
              div.innerHTML = `<div class="mdbl-src-left"><span class="mdbl-drag-handle">::</span><img src="${LOGO[k]}" style="height:16px"><span class="name" style="font-size:13px;margin-left:8px">${LABEL[k]}</span></div><input type="checkbox" ${CFG.sources[k]?'checked':''}>`;
              
-             // DRAG FIX: Stop propagation
+             // DRAG FIX
              div.onmousedown = (e) => e.stopPropagation();
              
              div.querySelector('input').onchange = (e) => { CFG.sources[k] = e.target.checked; updateGlobalStyles(); };
