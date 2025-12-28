@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.16.4 — Fix Fonts & Spacing)
+// @name          Jellyfin Ratings (v11.16.5 — Fix Order)
 // @namespace     https://mdblist.com
-// @version       11.16.4
-// @description   Fixes the CSS structure and moves 'Ends At' time inside the rating container before the settings icon.
+// @version       11.16.5
+// @description   Fixes the CSS structure and places settings gear between time and ratings.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.16.4...');
+console.log('[Jellyfin Ratings] Loading v11.16.5...');
 
 (function() {
     'use strict';
@@ -123,7 +123,6 @@ console.log('[Jellyfin Ratings] Loading v11.16.4...');
     document.head.appendChild(styleEl);
 
     function updateGlobalStyles() {
-        // Reduced margins below from 10px to 5px/4px as requested
         let rules = `
             .mdblist-rating-container { display: inline-flex; align-items: center; justify-content: flex-start; margin-left: 5px; margin-top: ${parseInt(CFG.spacing.ratingsTopGapPx)||0}px; vertical-align: middle; flex-wrap: wrap; }
             .mdbl-rating-item { display: inline-flex; align-items: center; margin: 0 4px; text-decoration: none; cursor: pointer; color: inherit; padding: 2px 4px; border-radius: 6px; }
@@ -131,12 +130,15 @@ console.log('[Jellyfin Ratings] Loading v11.16.4...');
             .mdbl-rating-item:hover { background: rgba(255,255,255,0.08); }
             .mdbl-rating-item img { height: 1.4em; vertical-align: middle; }
             .mdbl-rating-item span { font-size: 1em; vertical-align: middle; font-weight: 500; }
-            .mdbl-settings-btn { opacity: 0.6; margin-right: 4px; padding: 4px; cursor: pointer; display: inline-flex; vertical-align: middle; order: -9999 !important; }
+            
+            /* Gear Order: -5 ensures it is between Ends At (-10) and Ratings (-1 or 1+) */
+            .mdbl-settings-btn { opacity: 0.6; margin-right: 4px; padding: 4px; cursor: pointer; display: inline-flex; vertical-align: middle; order: -5 !important; }
             .mdbl-settings-btn:hover { opacity: 1; }
             .mdbl-settings-btn svg { width: 1.2em; height: 1.2em; fill: currentColor; }
             .mdbl-status-text { font-size: 11px; opacity: 0.8; margin-left: 5px; color: #ffeb3b; }
-            /* Adjusted Font and Spacing below */
-            .mdbl-ends-at { font-size: 1em; font-weight: 500; margin-right: 4px; cursor: default; white-space: nowrap; }
+            
+            /* Ends At Order: -10 ensures it is first */
+            .mdbl-ends-at { font-size: 1em; font-weight: 500; margin-right: 4px; cursor: default; white-space: nowrap; order: -10; }
             
             .starRatingContainer, .mediaInfoCriticRating, .mediaInfoAudienceRating, .starRating { display: none !important; }
             /* VITAL FIX: display:contents lets the children participate in the flex parent's ordering */
