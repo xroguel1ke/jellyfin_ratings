@@ -293,7 +293,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.5.1...');
         
         // Determine whether to show "Reviews" (Critic) or "Votes" (User)
         const isCritic = ['rotten_tomatoes_critic', 'metacritic_critic', 'roger_ebert'].includes(key);
-        const suffix = isCritic ? 'Reviews' : 'Votes';
+        const suffix = key === 'master' ? 'Sources' : (isCritic ? 'Reviews' : 'Votes');
         
         // Construct the tooltip string
         const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${suffix}` : title;
