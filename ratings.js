@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name          Jellyfin Ratings (v11.16.5 — Fix Order)
+// @name          Jellyfin Ratings (v11.16.5 — Tooltips Added)
 // @namespace     https://mdblist.com
-// @version       11.16.5
-// @description   Fixes the CSS structure and places settings gear between time and ratings.
+// @version       11.16.5.1
+// @description   Fixes the CSS structure and places settings gear between time and ratings. Adds Tooltips.
 // @match         *://*/*
 // ==/UserScript==
 
-console.log('[Jellyfin Ratings] Loading v11.16.5...');
+console.log('[Jellyfin Ratings] Loading v11.16.5.1...');
 
 (function() {
     'use strict';
@@ -113,7 +113,7 @@ console.log('[Jellyfin Ratings] Loading v11.16.5...');
         try { localStorage.setItem(`${NS}prefs`, JSON.stringify(CFG)); } catch (e) {}
     }
 
-    const localSlug = t => (t || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const localSlug = t => (t || '').toLowerCase().replace(/'/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 
     /* ==========================================================================
        2. STYLES
@@ -290,9 +290,18 @@ console.log('[Jellyfin Ratings] Loading v11.16.5...');
         if (score === null) return '';
         if (!LOGO[key]) return '';
         const r = Math.round(score);
-        const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} Votes` : title;
+        
+        // Determine whether to show "Reviews" (Critic) or "Votes" (User)
+        const isCritic = ['rotten_tomatoes_critic', 'metacritic_critic', 'roger_ebert'].includes(key);
+        const suffix = key === 'master' ? 'Sources' : (isCritic ? 'Reviews' : 'Votes');
+        
+        // Construct the tooltip string
+        const tooltip = (count && count > 0) ? `${title} — ${count.toLocaleString()} ${suffix}` : title;
+        
         const style = (!link || link === '#') ? 'cursor:default;' : 'cursor:pointer;';
-        return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" data-title="${tooltip}"><div class="mdbl-inner"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></div></a>`;
+        
+        // Used 'title' attribute instead of 'data-title' to enable browser tooltip
+        return `<a href="${link}" target="_blank" class="mdbl-rating-item" data-source="${key}" data-score="${r}" style="${style}" title="${tooltip}"><div class="mdbl-inner"><img src="${LOGO[key]}" alt="${title}"><span>${CFG.display.showPercentSymbol ? r+'%' : r}</span></div></a>`;
     }
 
     function renderRatings(container, data, type) {
