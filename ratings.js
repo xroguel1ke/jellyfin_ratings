@@ -68,12 +68,12 @@ console.log('[Jellyfin Ratings] Loading v11.16.5.1...');
 
     const ICON_BASE = 'https://raw.githubusercontent.com/xroguel1ke/jellyfin_ratings/refs/heads/main/assets/icons';
     const LOGO = {
-        master: `${ICON_BASE}/master.png`, imdb: `${ICON_BASE}/IMDb.png`, tmdb: `${ICON_BASE}/TMDB.png`,
-        trakt: `${ICON_BASE}/Trakt.png`, letterboxd: `${ICON_BASE}/letterboxd.png`, anilist: `${ICON_BASE}/anilist.png`,
-        myanimelist: `${ICON_BASE}/mal.png`, roger_ebert: `${ICON_BASE}/Roger_Ebert.png`,
-        rotten_tomatoes_critic: `${ICON_BASE}/Rotten_Tomatoes.png`,
-        rotten_tomatoes_audience: `${ICON_BASE}/Rotten_Tomatoes_positive_audience.png`,
-        metacritic_critic: `${ICON_BASE}/Metacritic.png`, metacritic_user: `${ICON_BASE}/mus2.png`
+        master: `${ICON_BASE}/master.png`, imdb: `${ICON_BASE}/imdb.png`, tmdb: `${ICON_BASE}/tmdb.png`,
+        trakt: `${ICON_BASE}/trakt.png`, letterboxd: `${ICON_BASE}/letterboxd.png`, anilist: `${ICON_BASE}/anilist.png`,
+        myanimelist: `${ICON_BASE}/myanimelist.png`, roger_ebert: `${ICON_BASE}/rogerebert.png`,
+        rotten_tomatoes_critic: `${ICON_BASE}/rottentomatoes.png`,
+        rotten_tomatoes_audience: `${ICON_BASE}/rottentomatoes_audience.png`,
+        metacritic_critic: `${ICON_BASE}/metacritic.png`, metacritic_user: `${ICON_BASE}/metacritic_audience.png`
     };
 
     const LABEL = {
